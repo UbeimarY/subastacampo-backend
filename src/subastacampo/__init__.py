@@ -1,2 +1,2 @@
 def main() -> None:
-    print("Hello from subastacampo!")
+    print("""SubastaCampo backend: real-time auctions over Connect RPC.""")
