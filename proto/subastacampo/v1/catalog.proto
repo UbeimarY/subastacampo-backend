@@ -1,0 +1,116 @@
+syntax = "proto3";
+
+package subastacampo.v1;
+
+import "google/protobuf/timestamp.proto";
+import "subastacampo/v1/common.proto";
+
+// Harvest publication and AI-assisted pricing.
+service CatalogService {
+  // Publishes a harvest. Producers only.
+  rpc CreateProduct(CreateProductRequest) returns (CreateProductResponse);
+  rpc GetProduct(GetProductRequest) returns (GetProductResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  // Lists products, newest first, with optional filters and pagination.
+  rpc ListProducts(ListProductsRequest) returns (ListProductsResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  // Suggests a price with the pricing model, explaining the main factors.
+  rpc SuggestPrice(SuggestPriceRequest) returns (SuggestPriceResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+}
+
+message Product {
+  string id = 1;
+  string producer_id = 2;
+  string name = 3;
+  string description = 4;
+  ProductCategory category = 5;
+  double quantity = 6;
+  QuantityUnit unit = 7;
+  // ISO 8601 date (YYYY-MM-DD).
+  string harvest_date = 8;
+  int32 shelf_life_days = 9;
+  // Computed by the server from the harvest date and the shelf life.
+  int32 remaining_shelf_life_days = 10;
+  google.protobuf.Timestamp created_at = 11;
+}
+
+// Why the model suggested a given price. Clients render the text.
+enum PriceFactorCode {
+  PRICE_FACTOR_CODE_UNSPECIFIED = 0;
+  PRICE_FACTOR_CODE_FRESH_PRODUCT = 1;
+  PRICE_FACTOR_CODE_SHORT_SHELF_LIFE = 2;
+  PRICE_FACTOR_CODE_HIGH_DEMAND = 3;
+  PRICE_FACTOR_CODE_LOW_DEMAND = 4;
+  PRICE_FACTOR_CODE_LARGE_VOLUME = 5;
+}
+
+message PriceFactor {
+  PriceFactorCode code = 1;
+  // Days, bids per auction or kilograms, depending on the code.
+  double value = 2;
+}
+
+message PriceSuggestion {
+  Money suggested_price = 1;
+  // 10th and 90th percentiles of the model's prediction.
+  Money range_min = 2;
+  Money range_max = 3;
+  Money price_per_kg = 4;
+  double quantity_kg = 5;
+  // Average bids per auction in this category during the last 30 days.
+  double category_demand = 6;
+  repeated PriceFactor factors = 7;
+  string model_version = 8;
+}
+
+message CreateProductRequest {
+  string name = 1;
+  string description = 2;
+  ProductCategory category = 3;
+  double quantity = 4;
+  QuantityUnit unit = 5;
+  // ISO 8601 date (YYYY-MM-DD). Cannot be in the future.
+  string harvest_date = 6;
+  int32 shelf_life_days = 7;
+}
+
+message CreateProductResponse {
+  Product product = 1;
+}
+
+message GetProductRequest {
+  string product_id = 1;
+}
+
+message GetProductResponse {
+  Product product = 1;
+}
+
+message ListProductsRequest {
+  // PRODUCT_CATEGORY_UNSPECIFIED returns every category.
+  ProductCategory category = 1;
+  // When true, only products of the authenticated producer.
+  bool only_mine = 2;
+  // Maximum results per page (default 20, maximum 100).
+  int32 page_size = 3;
+  // Token from a previous response to fetch the next page.
+  string page_token = 4;
+}
+
+message ListProductsResponse {
+  repeated Product products = 1;
+  // Empty when there are no more pages.
+  string next_page_token = 2;
+}
+
+message SuggestPriceRequest {
+  string product_id = 1;
+}
+
+message SuggestPriceResponse {
+  PriceSuggestion suggestion = 1;
+}
