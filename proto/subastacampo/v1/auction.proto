@@ -1,0 +1,181 @@
+syntax = "proto3";
+
+package subastacampo.v1;
+
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+import "subastacampo/v1/catalog.proto";
+import "subastacampo/v1/common.proto";
+
+// Live auctions: creation, bidding and real-time event streaming.
+service AuctionService {
+  // Starts an auction for one of the producer's products.
+  rpc CreateAuction(CreateAuctionRequest) returns (CreateAuctionResponse);
+  rpc GetAuction(GetAuctionRequest) returns (GetAuctionResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  rpc ListAuctions(ListAuctionsRequest) returns (ListAuctionsResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+  // Places a bid. Buyers only. Concurrent bids are serialized by the server,
+  // so no valid bid is ever lost.
+  rpc PlaceBid(PlaceBidRequest) returns (PlaceBidResponse);
+  // Streams live events of one auction. The first message is always a full
+  // snapshot, so a client that (re)connects never misses any state.
+  rpc WatchAuction(WatchAuctionRequest) returns (stream WatchAuctionResponse);
+}
+
+enum AuctionStatus {
+  AUCTION_STATUS_UNSPECIFIED = 0;
+  AUCTION_STATUS_SCHEDULED = 1;
+  AUCTION_STATUS_ACTIVE = 2;
+  AUCTION_STATUS_CLOSED = 3;
+  AUCTION_STATUS_CANCELLED = 4;
+}
+
+// Which auctions to list.
+enum AuctionScope {
+  // Every auction on the platform.
+  AUCTION_SCOPE_UNSPECIFIED = 0;
+  // Auctions of the authenticated producer's products.
+  AUCTION_SCOPE_MY_PRODUCTS = 1;
+  // Auctions where the authenticated buyer has placed bids.
+  AUCTION_SCOPE_MY_BIDS = 2;
+}
+
+enum RiskLevel {
+  RISK_LEVEL_UNSPECIFIED = 0;
+  RISK_LEVEL_LOW = 1;
+  RISK_LEVEL_MEDIUM = 2;
+  RISK_LEVEL_HIGH = 3;
+}
+
+// Signals that raise the risk score of a bid.
+enum RiskSignal {
+  RISK_SIGNAL_UNSPECIFIED = 0;
+  RISK_SIGNAL_LAST_10_SECONDS = 1;
+  RISK_SIGNAL_LAST_30_SECONDS = 2;
+  RISK_SIGNAL_FIRST_BID_AT_CLOSE = 3;
+  RISK_SIGNAL_REPEATED_EXTENSIONS = 4;
+  RISK_SIGNAL_NEW_ACCOUNT = 5;
+  RISK_SIGNAL_LAST_MINUTE_HABIT = 6;
+  RISK_SIGNAL_SHARES_PHONE_WITH_PRODUCER = 7;
+}
+
+message Auction {
+  string id = 1;
+  Product product = 2;
+  Money starting_price = 3;
+  Money min_increment = 4;
+  Money current_price = 5;
+  // Lowest amount the next bid must reach. Computed by the server, so
+  // clients never duplicate the bidding rules.
+  Money next_min_bid = 6;
+  google.protobuf.Timestamp starts_at = 7;
+  google.protobuf.Timestamp ends_at = 8;
+  AuctionStatus status = 9;
+  // Times the closing time was extended by last-minute bids.
+  int32 extension_count = 10;
+  int32 bid_count = 11;
+  // Set only when the auction closed with at least one bid.
+  optional string winner_id = 12;
+}
+
+message RiskAssessment {
+  // From 0 (no risk) to 100.
+  int32 score = 1;
+  RiskLevel level = 2;
+  repeated RiskSignal signals = 3;
+}
+
+message Bid {
+  string id = 1;
+  string auction_id = 2;
+  string bidder_id = 3;
+  // Anonymous number per auction, shown instead of the bidder's identity.
+  int32 bidder_number = 4;
+  Money amount = 5;
+  google.protobuf.Timestamp placed_at = 6;
+  // True when this bid pushed the closing time (anti-sniping rule).
+  bool extended_close = 7;
+  // Only filled for the producer who owns the auction; empty for everyone else.
+  RiskAssessment risk = 8;
+}
+
+message CreateAuctionRequest {
+  string product_id = 1;
+  Money starting_price = 2;
+  Money min_increment = 3;
+  // Between 1 minute and 24 hours.
+  google.protobuf.Duration duration = 4;
+}
+
+message CreateAuctionResponse {
+  Auction auction = 1;
+}
+
+message GetAuctionRequest {
+  string auction_id = 1;
+}
+
+message GetAuctionResponse {
+  Auction auction = 1;
+  // Newest first.
+  repeated Bid bids = 2;
+}
+
+message ListAuctionsRequest {
+  // AUCTION_STATUS_UNSPECIFIED returns every status.
+  AuctionStatus status = 1;
+  AuctionScope scope = 2;
+  // Maximum results per page (default 20, maximum 100).
+  int32 page_size = 3;
+  string page_token = 4;
+}
+
+message ListAuctionsResponse {
+  repeated Auction auctions = 1;
+  string next_page_token = 2;
+}
+
+message PlaceBidRequest {
+  string auction_id = 1;
+  Money amount = 2;
+  // Client-generated UUID. Retrying a request with the same id never
+  // creates a second bid (idempotency on unreliable networks).
+  string request_id = 3;
+}
+
+message PlaceBidResponse {
+  Bid bid = 1;
+  Auction auction = 2;
+}
+
+message WatchAuctionRequest {
+  string auction_id = 1;
+}
+
+message WatchAuctionResponse {
+  oneof event {
+    // Full state. Always the first message of the stream.
+    AuctionSnapshot snapshot = 1;
+    BidPlaced bid_placed = 2;
+    AuctionClosed auction_closed = 3;
+  }
+}
+
+message AuctionSnapshot {
+  Auction auction = 1;
+  // Newest first.
+  repeated Bid bids = 2;
+}
+
+message BidPlaced {
+  Bid bid = 1;
+  Auction auction = 2;
+}
+
+message AuctionClosed {
+  Auction auction = 1;
+}
+
