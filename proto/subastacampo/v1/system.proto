@@ -1,0 +1,21 @@
+syntax = "proto3";
+
+package subastacampo.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// Operational information about the service.
+service SystemService {
+  // Reports whether the service and its database are healthy.
+  rpc GetStatus(GetStatusRequest) returns (GetStatusResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+}
+
+message GetStatusRequest {}
+
+message GetStatusResponse {
+  string version = 1;
+  bool database_ok = 2;
+  google.protobuf.Timestamp server_time = 3;
+}
