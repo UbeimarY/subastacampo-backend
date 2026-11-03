@@ -1,0 +1,72 @@
+syntax = "proto3";
+
+package subastacampo.v1;
+
+// Role of a platform user. Each account has exactly one role.
+enum UserRole {
+  USER_ROLE_UNSPECIFIED = 0;
+  USER_ROLE_PRODUCER = 1;
+  USER_ROLE_BUYER = 2;
+}
+
+// Product category. It is also a feature of the pricing model.
+enum ProductCategory {
+  PRODUCT_CATEGORY_UNSPECIFIED = 0;
+  PRODUCT_CATEGORY_FRUITS = 1;
+  PRODUCT_CATEGORY_VEGETABLES = 2;
+  PRODUCT_CATEGORY_TUBERS = 3;
+  PRODUCT_CATEGORY_GRAINS = 4;
+  PRODUCT_CATEGORY_DAIRY = 5;
+  PRODUCT_CATEGORY_OTHER = 6;
+}
+
+// Units a producer can sell in. All of them convert to kilograms,
+// which the pricing model needs.
+enum QuantityUnit {
+  QUANTITY_UNIT_UNSPECIFIED = 0;
+  QUANTITY_UNIT_KILOGRAM = 1;
+  // 12.5 kg.
+  QUANTITY_UNIT_ARROBA = 2;
+  // A sack ("bulto"), 50 kg.
+  QUANTITY_UNIT_SACK = 3;
+  // A crate ("canastilla"), about 20 kg.
+  QUANTITY_UNIT_CRATE = 4;
+}
+
+// A monetary amount in whole units. Colombian pesos have no minor unit
+// in practice, and integers avoid floating point rounding errors.
+message Money {
+  // ISO 4217 currency code. Always "COP" for now.
+  string currency_code = 1;
+  int64 units = 2;
+}
+
+// Stable, language-neutral reason attached to every error as a detail.
+// Clients translate it into the user's language.
+enum ErrorReason {
+  ERROR_REASON_UNSPECIFIED = 0;
+  ERROR_REASON_VALIDATION_FAILED = 1;
+  ERROR_REASON_EMAIL_ALREADY_REGISTERED = 2;
+  ERROR_REASON_INVALID_CREDENTIALS = 3;
+  ERROR_REASON_SESSION_EXPIRED = 4;
+  ERROR_REASON_PRODUCER_ONLY = 5;
+  ERROR_REASON_BUYER_ONLY = 6;
+  ERROR_REASON_NOT_PRODUCT_OWNER = 7;
+  ERROR_REASON_PRODUCT_NOT_FOUND = 8;
+  ERROR_REASON_HARVEST_DATE_IN_FUTURE = 9;
+  ERROR_REASON_AUCTION_NOT_FOUND = 10;
+  ERROR_REASON_AUCTION_ALREADY_ACTIVE = 11;
+  ERROR_REASON_AUCTION_NOT_ACTIVE = 12;
+  ERROR_REASON_BID_TOO_LOW = 13;
+}
+
+// Machine-readable error information, sent as a Connect error detail.
+message ErrorDetail {
+  ErrorReason reason = 1;
+  // Field that failed validation, when it applies (for example "email").
+  string field = 2;
+  // For ERROR_REASON_BID_TOO_LOW: the current minimum, so the client
+  // can show it without another request.
+  Money minimum_bid = 3;
+}
+
