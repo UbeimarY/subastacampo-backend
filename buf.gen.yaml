@@ -1,0 +1,10 @@
+version: v2
+plugins:
+  - remote: buf.build/protocolbuffers/python
+    out: src
+  - remote: buf.build/protocolbuffers/pyi
+    out: src
+  - remote: buf.build/connectrpc/py
+    out: src
+    opt: protobuf=google
+    

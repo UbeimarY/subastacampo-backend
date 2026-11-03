@@ -8,6 +8,7 @@ authors = [
 requires-python = ">=3.11"
 dependencies = [
     "connectrpc>=0.13.0",
+    "protobuf>=7.36.2",
     "uvicorn>=0.54.0",
 ]
 
