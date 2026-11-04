@@ -35,5 +35,3 @@ class SystemServiceImpl(SystemService):
             logger.exception("Database health check failed")
             return False
         return True
-
-    

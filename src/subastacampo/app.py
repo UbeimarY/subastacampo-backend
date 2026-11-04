@@ -51,4 +51,3 @@ def create_app(settings: Settings | None = None) -> ASGIApp:
 def _service_name(module: ModuleType, service: str) -> str:
     """Fully qualified name taken from the contract itself, never hard-coded."""
     return module.DESCRIPTOR.services_by_name[service].full_name
-

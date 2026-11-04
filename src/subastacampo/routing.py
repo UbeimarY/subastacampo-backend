@@ -59,5 +59,3 @@ class ConnectRouter:
                     await hook()
                 await send({"type": "lifespan.shutdown.complete"})
                 return
-
-            

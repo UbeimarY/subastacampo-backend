@@ -87,9 +87,7 @@ class User(Base):
     role: Mapped[UserRole] = mapped_column(_enum_column(UserRole, "user_role"))
     phone: Mapped[str | None] = mapped_column(String(20))
     municipality: Mapped[str | None] = mapped_column(String(100))
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     products: Mapped[list["Product"]] = relationship(back_populates="producer", lazy="raise")
 
@@ -113,9 +111,7 @@ class Product(Base):
     unit: Mapped[QuantityUnit] = mapped_column(_enum_column(QuantityUnit, "quantity_unit"))
     harvest_date: Mapped[date]
     shelf_life_days: Mapped[int] = mapped_column(Integer)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     producer: Mapped[User] = relationship(back_populates="products", lazy="raise")
     auctions: Mapped[list["Auction"]] = relationship(back_populates="product", lazy="raise")
@@ -153,9 +149,7 @@ class Auction(Base):
     extension_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     bid_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     winner_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"))
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     product: Mapped[Product] = relationship(back_populates="auctions", lazy="raise")
     bids: Mapped[list["Bid"]] = relationship(back_populates="auction", lazy="raise")
@@ -177,9 +171,7 @@ class Bid(Base):
     # Anonymous number of the bidder within this auction ("Comprador #3").
     bidder_number: Mapped[int] = mapped_column(Integer)
     amount: Mapped[int] = mapped_column(BigInteger)
-    placed_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    placed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     # True when this bid pushed the closing time (anti-sniping rule).
     extended_close: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
     request_id: Mapped[uuid.UUID]
@@ -190,5 +182,3 @@ class Bid(Base):
     )
 
     auction: Mapped[Auction] = relationship(back_populates="bids", lazy="raise")
-
-    

@@ -39,9 +39,7 @@ async def test_unknown_service_returns_404(client: httpx.AsyncClient) -> None:
 
 
 async def test_get_status_reports_database_down(client: httpx.AsyncClient) -> None:
-    response = await client.post(
-        STATUS_PATH, json={}, headers={"Connect-Protocol-Version": "1"}
-    )
+    response = await client.post(STATUS_PATH, json={}, headers={"Connect-Protocol-Version": "1"})
 
     assert response.status_code == 200
     body = response.json()
@@ -55,4 +53,3 @@ def test_settings_normalize_database_driver() -> None:
     settings = Settings(database_url="postgres://user:pass@host:5432/db", jwt_secret="x")
 
     assert settings.database_url == "postgresql+asyncpg://user:pass@host:5432/db"
-    
