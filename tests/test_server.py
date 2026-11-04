@@ -6,6 +6,8 @@ import pytest
 from subastacampo.app import create_app
 from subastacampo.config import Settings
 
+from tests.conftest import TEST_JWT_SECRET
+
 pytestmark = pytest.mark.anyio
 
 # Nothing listens on port 1, so every connection attempt fails fast.
@@ -15,7 +17,7 @@ STATUS_PATH = "/subastacampo.v1.SystemService/GetStatus"
 
 @pytest.fixture
 def settings() -> Settings:
-    return Settings(database_url=UNREACHABLE_DATABASE, jwt_secret="test-secret")
+    return Settings(database_url=UNREACHABLE_DATABASE, jwt_secret=TEST_JWT_SECRET)
 
 
 @pytest.fixture
