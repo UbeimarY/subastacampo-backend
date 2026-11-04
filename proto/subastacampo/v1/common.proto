@@ -58,6 +58,7 @@ enum ErrorReason {
   ERROR_REASON_AUCTION_ALREADY_ACTIVE = 11;
   ERROR_REASON_AUCTION_NOT_ACTIVE = 12;
   ERROR_REASON_BID_TOO_LOW = 13;
+  ERROR_REASON_AUTHENTICATION_REQUIRED = 14;
 }
 
 // Machine-readable error information, sent as a Connect error detail.
