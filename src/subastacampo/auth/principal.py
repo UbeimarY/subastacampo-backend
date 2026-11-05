@@ -75,4 +75,3 @@ def require_principal(*, role: UserRole | None = None) -> Principal:
             f"This RPC is only available to the {role.value} role",
         )
     return principal
-

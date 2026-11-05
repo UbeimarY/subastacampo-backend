@@ -48,5 +48,3 @@ def test_constraints_follow_the_naming_convention() -> None:
     }
 
     assert "ck_bids_amount_positive" in check_names
-
-    

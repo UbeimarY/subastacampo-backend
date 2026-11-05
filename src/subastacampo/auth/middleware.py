@@ -52,4 +52,3 @@ def _header(scope: Scope, name: bytes) -> str | None:
         if key == name:
             return value.decode("latin-1")
     return None
-

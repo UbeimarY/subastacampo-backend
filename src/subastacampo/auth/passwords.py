@@ -21,4 +21,3 @@ async def hash_password(password: str) -> str:
 
 async def verify_password(password: str, password_hash: str | None) -> bool:
     return await asyncio.to_thread(_hasher.verify, password, password_hash or _DUMMY_HASH)
-

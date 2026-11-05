@@ -51,5 +51,3 @@ async def api(database_settings: Settings) -> AsyncIterator[httpx.AsyncClient]:
             headers={"Connect-Protocol-Version": "1"},
         ) as client:
             yield client
-
-            

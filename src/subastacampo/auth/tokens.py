@@ -58,5 +58,3 @@ class TokenService:
             return Principal(user_id=uuid.UUID(claims["sub"]), role=UserRole(claims["role"]))
         except (jwt.PyJWTError, KeyError, ValueError) as error:
             raise InvalidTokenError(str(error)) from error
-
-        
