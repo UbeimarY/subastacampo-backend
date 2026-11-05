@@ -5,7 +5,6 @@ import pytest
 
 from subastacampo.app import create_app
 from subastacampo.config import Settings
-
 from tests.conftest import TEST_JWT_SECRET
 
 pytestmark = pytest.mark.anyio
