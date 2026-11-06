@@ -16,6 +16,8 @@ class Settings(BaseSettings):
     jwt_secret: str
     jwt_expire_minutes: int = 60 * 24
     cors_origins: list[str] = ["http://localhost:4200"]
+        # Business dates ("harvested today") follow the farmers' local time zone.
+    business_timezone: str = "America/Bogota"
 
     @field_validator("database_url")
     @classmethod
