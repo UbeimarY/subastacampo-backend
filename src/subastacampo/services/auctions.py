@@ -1,4 +1,4 @@
-"""Auction creation, listing and bidding."""
+"""Auction creation, listing, bidding and live streaming."""
 
 import uuid
 from collections.abc import AsyncIterator, Callable
@@ -11,7 +11,14 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import selectinload
 
+from subastacampo.auctions.broker import AuctionEventBroker, SubscriptionOverflowError
 from subastacampo.auctions.closing import close_if_due, load_auction
+from subastacampo.auctions.events import (
+    auction_closed_event,
+    bid_placed_event,
+    redact_for,
+    snapshot_event,
+)
 from subastacampo.auctions.rules import (
     MAX_DURATION,
     MIN_DURATION,
@@ -57,10 +64,12 @@ class AuctionServiceImpl(AuctionService):
         session_factory: async_sessionmaker[AsyncSession],
         calendar: BusinessCalendar,
         clock: Clock,
+        broker: AuctionEventBroker,
     ) -> None:
         self._session_factory = session_factory
         self._calendar = calendar
         self._clock = clock
+        self._broker = broker
 
     async def create_auction(
         self,
@@ -120,28 +129,8 @@ class AuctionServiceImpl(AuctionService):
         ctx: RequestContext[GetAuctionRequest, GetAuctionResponse],
     ) -> GetAuctionResponse:
         auction_id = _parse_id(request.auction_id, _auction_not_found)
-        now = self._clock.now()
-
         async with self._session_factory() as session:
-            auction = await load_auction(session, auction_id)
-            if auction is None:
-                raise _auction_not_found()
-            # Lazy close: a reader never sees an expired auction as still active.
-            if auction.status == AuctionStatus.ACTIVE and has_expired(
-                now=now, ends_at=auction.ends_at
-            ):
-                auction = await load_auction(session, auction_id, for_update=True)
-                assert auction is not None
-                if await close_if_due(session, auction, now):
-                    await session.commit()
-
-            bids = (
-                await session.scalars(
-                    select(Bid)
-                    .where(Bid.auction_id == auction.id)
-                    .order_by(Bid.placed_at.desc(), Bid.id.desc())
-                )
-            ).all()
+            auction, bids = await self._load_detail(session, auction_id)
 
         include_risk = _is_owner(auction)
         return GetAuctionResponse(
@@ -221,6 +210,9 @@ class AuctionServiceImpl(AuctionService):
                 raise _auction_not_found()
             if await close_if_due(session, auction, now):
                 await session.commit()
+                self._broker.publish(
+                    auction.id, auction_closed_event(auction, today=self._calendar.today())
+                )
                 raise _auction_not_active()
             if auction.status != AuctionStatus.ACTIVE:
                 raise _auction_not_active()
@@ -268,9 +260,12 @@ class AuctionServiceImpl(AuctionService):
                     raise
                 return retried
 
+        today = self._calendar.today()
+        # Published only after the commit: nobody hears about a bid that was not saved.
+        self._broker.publish(auction.id, bid_placed_event(bid, auction, today=today))
         return PlaceBidResponse(
             bid=to_bid_message(bid, include_risk=False),
-            auction=to_auction_message(auction, today=self._calendar.today()),
+            auction=to_auction_message(auction, today=today),
         )
 
     async def watch_auction(
@@ -278,9 +273,59 @@ class AuctionServiceImpl(AuctionService):
         request: WatchAuctionRequest,
         ctx: RequestContext[WatchAuctionRequest, WatchAuctionResponse],
     ) -> AsyncIterator[WatchAuctionResponse]:
-        # Implemented in the next step, with the live event broker.
-        raise ConnectError(Code.UNIMPLEMENTED, "Live streaming is not available yet")
-        yield  # pragma: no cover  (marks this method as an async generator)
+        auction_id = _parse_id(request.auction_id, _auction_not_found)
+
+        # Subscribe BEFORE reading the snapshot: an event published in between is
+        # queued instead of lost. Duplicates are harmless: clients dedupe by id.
+        with self._broker.subscribe(auction_id) as subscription:
+            async with self._session_factory() as session:
+                auction, bids = await self._load_detail(session, auction_id)
+            include_risk = _is_owner(auction)
+
+            yield snapshot_event(
+                auction, bids, today=self._calendar.today(), include_risk=include_risk
+            )
+            if auction.status != AuctionStatus.ACTIVE:
+                return
+
+            while True:
+                try:
+                    event = await subscription.next()
+                except SubscriptionOverflowError as error:
+                    raise ConnectError(
+                        Code.ABORTED, "Too many pending events: reconnect to resume"
+                    ) from error
+                yield redact_for(event, include_risk=include_risk)
+                if event.WhichOneof("event") == "auction_closed":
+                    return
+
+    async def _load_detail(
+        self, session: AsyncSession, auction_id: uuid.UUID
+    ) -> tuple[Auction, list[Bid]]:
+        """Auction with its bids, newest first. Closes it lazily if its time is up."""
+        now = self._clock.now()
+        auction = await load_auction(session, auction_id)
+        if auction is None:
+            raise _auction_not_found()
+
+        if auction.status == AuctionStatus.ACTIVE and has_expired(now=now, ends_at=auction.ends_at):
+            locked = await load_auction(session, auction_id, for_update=True)
+            assert locked is not None
+            auction = locked
+            if await close_if_due(session, auction, now):
+                await session.commit()
+                self._broker.publish(
+                    auction.id, auction_closed_event(auction, today=self._calendar.today())
+                )
+
+        bids = (
+            await session.scalars(
+                select(Bid)
+                .where(Bid.auction_id == auction.id)
+                .order_by(Bid.placed_at.desc(), Bid.id.desc())
+            )
+        ).all()
+        return auction, list(bids)
 
     async def _replay(
         self, session: AsyncSession, bidder_id: uuid.UUID, request_id: uuid.UUID

@@ -8,6 +8,8 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from starlette.middleware.cors import CORSMiddleware
 from starlette.types import ASGIApp
 
+from subastacampo.auctions.broker import AuctionEventBroker
+from subastacampo.auctions.closer import AuctionCloser
 from subastacampo.auth.middleware import AuthenticationMiddleware
 from subastacampo.auth.tokens import TokenService
 from subastacampo.calendar import BusinessCalendar
@@ -40,10 +42,13 @@ def create_app(
     *,
     calendar: BusinessCalendar | None = None,
     clock: Clock | None = None,
+    broker: AuctionEventBroker | None = None,
+    closer_interval_seconds: float = 1.0,
 ) -> ASGIApp:
     settings = settings or get_settings()
     calendar = calendar or BusinessCalendar(settings.business_timezone)
     clock = clock or SystemClock()
+    broker = broker or AuctionEventBroker()
 
     engine = create_async_engine(settings.database_url, pool_pre_ping=True)
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
@@ -63,11 +68,17 @@ def create_app(
             CatalogServiceImpl(session_factory, calendar, pricing)
         ),
         _service_name(auction_pb2, "AuctionService"): AuctionServiceASGIApplication(
-            AuctionServiceImpl(session_factory, calendar, clock)
+            AuctionServiceImpl(session_factory, calendar, clock, broker)
         ),
     }
 
-    router = ConnectRouter(services, on_shutdown=[engine.dispose])
+    closer = AuctionCloser(session_factory, broker, clock, calendar, closer_interval_seconds)
+    router = ConnectRouter(
+        services,
+        on_startup=[closer.start],
+        # Stop the background task before closing the database connections.
+        on_shutdown=[closer.stop, engine.dispose],
+    )
 
     # Outermost first: CORS answers preflights, then the caller is identified.
     return CORSMiddleware(
