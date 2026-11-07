@@ -1,12 +1,13 @@
 """Conversions between database models and contract messages."""
 
-from datetime import datetime
+from datetime import date, datetime, timedelta
 
 from google.protobuf.timestamp_pb2 import Timestamp
 
-from subastacampo.db.models import User, UserRole
+from subastacampo.db.models import Product, ProductCategory, QuantityUnit, User, UserRole
 from subastacampo.v1 import common_pb2
 from subastacampo.v1.auth_pb2 import User as UserMessage
+from subastacampo.v1.catalog_pb2 import Product as ProductMessage
 
 _ROLE_TO_PROTO = {
     UserRole.PRODUCER: common_pb2.USER_ROLE_PRODUCER,
@@ -34,3 +35,43 @@ def to_user_message(user: User) -> UserMessage:
     if user.municipality is not None:
         message.municipality = user.municipality
     return message
+
+_CATEGORY_TO_PROTO = {
+    ProductCategory.FRUITS: common_pb2.PRODUCT_CATEGORY_FRUITS,
+    ProductCategory.VEGETABLES: common_pb2.PRODUCT_CATEGORY_VEGETABLES,
+    ProductCategory.TUBERS: common_pb2.PRODUCT_CATEGORY_TUBERS,
+    ProductCategory.GRAINS: common_pb2.PRODUCT_CATEGORY_GRAINS,
+    ProductCategory.DAIRY: common_pb2.PRODUCT_CATEGORY_DAIRY,
+    ProductCategory.OTHER: common_pb2.PRODUCT_CATEGORY_OTHER,
+}
+CATEGORY_FROM_PROTO = {proto: category for category, proto in _CATEGORY_TO_PROTO.items()}
+
+_UNIT_TO_PROTO = {
+    QuantityUnit.KILOGRAM: common_pb2.QUANTITY_UNIT_KILOGRAM,
+    QuantityUnit.ARROBA: common_pb2.QUANTITY_UNIT_ARROBA,
+    QuantityUnit.SACK: common_pb2.QUANTITY_UNIT_SACK,
+    QuantityUnit.CRATE: common_pb2.QUANTITY_UNIT_CRATE,
+}
+UNIT_FROM_PROTO = {proto: unit for unit, proto in _UNIT_TO_PROTO.items()}
+
+
+def remaining_shelf_life_days(product: Product, *, today: date) -> int:
+    expires_on = product.harvest_date + timedelta(days=product.shelf_life_days)
+    return max(0, (expires_on - today).days)
+
+
+def to_product_message(product: Product, *, today: date) -> ProductMessage:
+    return ProductMessage(
+        id=str(product.id),
+        producer_id=str(product.producer_id),
+        name=product.name,
+        description=product.description,
+        category=_CATEGORY_TO_PROTO[product.category],
+        quantity=float(product.quantity),
+        unit=_UNIT_TO_PROTO[product.unit],
+        harvest_date=product.harvest_date.isoformat(),
+        shelf_life_days=product.shelf_life_days,
+        remaining_shelf_life_days=remaining_shelf_life_days(product, today=today),
+        created_at=to_timestamp(product.created_at),
+    )
+
