@@ -212,3 +212,26 @@ async def test_only_the_owner_sees_the_risk_of_each_bid(
 
 def test_the_test_clock_starts_on_the_business_day() -> None:
     assert NOW.date() == TODAY
+
+
+async def test_an_accomplice_bid_is_flagged_to_the_owner(
+    api: httpx.AsyncClient, clock: FakeClock
+) -> None:
+    owner = await sign_up(
+        api, role="USER_ROLE_PRODUCER", email="duena@test.com", phone="+57 313 522 0484"
+    )
+    accomplice = await sign_up(
+        api, role="USER_ROLE_BUYER", email="complice@test.com", phone="3135220484"
+    )
+    auction = await start_auction(api, owner, minutes=10)
+    clock.advance(timedelta(minutes=9, seconds=40))  # 20 seconds left
+
+    await bid(api, accomplice, auction["id"], STARTING_PRICE)
+
+    response = await call(
+        api, "AuctionService", "GetAuction", {"auctionId": auction["id"]}, token=owner
+    )
+    risk = response.json()["bids"][0]["risk"]
+    assert risk["level"] == "RISK_LEVEL_HIGH"
+    assert risk["score"] == 80
+    assert "RISK_SIGNAL_SHARES_PHONE_WITH_PRODUCER" in risk["signals"]

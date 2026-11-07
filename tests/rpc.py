@@ -32,15 +32,20 @@ def error_detail(response: httpx.Response) -> ErrorDetail:
     return ErrorDetail.FromString(base64.b64decode(padded))
 
 
-async def sign_up(client: httpx.AsyncClient, *, role: str, email: str) -> str:
+async def sign_up(
+    client: httpx.AsyncClient, *, role: str, email: str, phone: str | None = None
+) -> str:
     """Registers a user and returns an access token."""
     password = "very-secure-1"
-    await call(
-        client,
-        "AuthService",
-        "Register",
-        {"fullName": "Usuario Prueba", "email": email, "password": password, "role": role},
-    )
+    body: dict[str, Any] = {
+        "fullName": "Usuario Prueba",
+        "email": email,
+        "password": password,
+        "role": role,
+    }
+    if phone:
+        body["phone"] = phone
+    await call(client, "AuthService", "Register", body)
     response = await call(client, "AuthService", "Login", {"email": email, "password": password})
     return str(response.json()["accessToken"])
 
