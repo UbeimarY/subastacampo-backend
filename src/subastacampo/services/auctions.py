@@ -29,7 +29,7 @@ from subastacampo.auctions.rules import (
 from subastacampo.auth.principal import optional_principal, require_principal
 from subastacampo.calendar import BusinessCalendar
 from subastacampo.clock import Clock
-from subastacampo.db.models import Auction, AuctionStatus, Bid, Product, UserRole
+from subastacampo.db.models import Auction, AuctionStatus, Bid, Product, User, UserRole
 from subastacampo.errors import rpc_error, validation_error
 from subastacampo.mappers import (
     STATUS_FROM_PROTO,
@@ -40,6 +40,8 @@ from subastacampo.mappers import (
     to_bid_message,
 )
 from subastacampo.pagination import Cursor, decode_cursor, encode_cursor, resolve_page_size
+from subastacampo.risk.facts import gather_facts
+from subastacampo.risk.scoring import score_bid
 from subastacampo.v1 import auction_pb2, common_pb2
 from subastacampo.v1.auction_connect import AuctionService
 from subastacampo.v1.auction_pb2 import (
@@ -232,6 +234,20 @@ class AuctionServiceImpl(AuctionService):
                 )
 
             close_time = apply_anti_sniping(now=now, ends_at=auction.ends_at)
+
+            # Scored before inserting the bid, so the facts describe the past only.
+            bidder = await session.get(User, principal.user_id)
+            assert bidder is not None
+            risk = score_bid(
+                await gather_facts(
+                    session,
+                    auction=auction,
+                    bidder=bidder,
+                    now=now,
+                    extends_close=close_time.extended,
+                )
+            )
+
             bid = Bid(
                 auction_id=auction.id,
                 bidder_id=principal.user_id,
@@ -240,8 +256,8 @@ class AuctionServiceImpl(AuctionService):
                 placed_at=now,
                 extended_close=close_time.extended,
                 request_id=request_id,
-                risk_score=0,
-                risk_signals=[],
+                risk_score=risk.score,
+                risk_signals=[signal.value for signal in risk.signals],
             )
             session.add(bid)
             auction.current_price = amount
