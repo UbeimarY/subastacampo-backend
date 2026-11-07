@@ -1,5 +1,5 @@
 from collections.abc import AsyncIterator
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 
 import httpx
 import pytest
@@ -26,6 +26,27 @@ class FixedCalendar(BusinessCalendar):
 
     def today(self) -> date:
         return self._today
+
+
+NOW = datetime(2026, 11, 4, 15, 0, tzinfo=UTC)
+
+
+class FakeClock:
+    """Time only moves when a test says so."""
+
+    def __init__(self, start: datetime) -> None:
+        self._now = start
+
+    def now(self) -> datetime:
+        return self._now
+
+    def advance(self, delta: timedelta) -> None:
+        self._now += delta
+
+
+@pytest.fixture
+def clock() -> FakeClock:
+    return FakeClock(NOW)
 
 
 class _TestEnvironment(BaseSettings):
@@ -55,9 +76,9 @@ async def database_settings() -> AsyncIterator[Settings]:
 
 
 @pytest.fixture
-async def api(database_settings: Settings) -> AsyncIterator[httpx.AsyncClient]:
+async def api(database_settings: Settings, clock: FakeClock) -> AsyncIterator[httpx.AsyncClient]:
     """HTTP client running the real app, including startup and shutdown."""
-    app = create_app(database_settings, calendar=FixedCalendar(TODAY))
+    app = create_app(database_settings, calendar=FixedCalendar(TODAY), clock=clock)
     async with LifespanManager(app) as manager:
         transport = httpx.ASGITransport(app=manager.app)
         async with httpx.AsyncClient(

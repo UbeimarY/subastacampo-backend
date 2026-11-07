@@ -40,3 +40,8 @@ async def sign_up(client: httpx.AsyncClient, *, role: str, email: str) -> str:
     )
     response = await call(client, "AuthService", "Login", {"email": email, "password": password})
     return str(response.json()["accessToken"])
+
+
+async def current_user_id(client: httpx.AsyncClient, token: str) -> str:
+    response = await call(client, "AuthService", "GetCurrentUser", token=token)
+    return str(response.json()["user"]["id"])
