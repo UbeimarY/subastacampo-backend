@@ -65,9 +65,7 @@ def generate(rows: int = 8000, seed: int = 42) -> pd.DataFrame:
         freshness = 0.55 + 0.45 * fraction**0.7
         volume = 1 - 0.06 * np.log10(quantity_kg)
         noise = rng.lognormal(0, 0.08)
-        price = (
-            BASE_PRICE_PER_KG[category] * season * demand_effect * freshness * volume * noise
-        )
+        price = BASE_PRICE_PER_KG[category] * season * demand_effect * freshness * volume * noise
 
         records.append(
             {

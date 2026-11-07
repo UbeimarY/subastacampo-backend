@@ -98,7 +98,7 @@ class Product(Base):
         CheckConstraint("quantity > 0", name="quantity_positive"),
         CheckConstraint("shelf_life_days BETWEEN 1 AND 365", name="shelf_life_range"),
         Index("ix_products_category_created_at", "category", "created_at"),
-                # Newest-first listing with keyset pagination (created_at, id).
+        # Newest-first listing with keyset pagination (created_at, id).
         Index("ix_products_created_at_id", "created_at", "id"),
     )
 

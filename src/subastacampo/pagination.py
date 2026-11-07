@@ -43,4 +43,3 @@ def decode_cursor(token: str) -> Cursor | None:
         return Cursor(created_at=datetime.fromisoformat(data["c"]), id=uuid.UUID(data["i"]))
     except (ValueError, KeyError, TypeError) as error:
         raise validation_error("page_token", "Page token is invalid") from error
-    

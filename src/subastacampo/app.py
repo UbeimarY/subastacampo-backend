@@ -12,6 +12,7 @@ from subastacampo.auth.middleware import AuthenticationMiddleware
 from subastacampo.auth.tokens import TokenService
 from subastacampo.calendar import BusinessCalendar
 from subastacampo.config import Settings, get_settings
+from subastacampo.pricing.model import PricingModel
 from subastacampo.routing import ConnectRouter
 from subastacampo.services.auth import AuthServiceImpl
 from subastacampo.services.catalog import CatalogServiceImpl
@@ -20,8 +21,6 @@ from subastacampo.v1 import auth_pb2, catalog_pb2, system_pb2
 from subastacampo.v1.auth_connect import AuthServiceASGIApplication
 from subastacampo.v1.catalog_connect import CatalogServiceASGIApplication
 from subastacampo.v1.system_connect import SystemServiceASGIApplication
-
-from subastacampo.pricing.model import PricingModel
 
 # Headers the browser client sends; CORS must allow them explicitly.
 CONNECT_REQUEST_HEADERS = [

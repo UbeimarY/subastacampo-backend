@@ -14,5 +14,3 @@ class BusinessCalendar:
 
     def today(self) -> date:
         return datetime.now(self._zone).date()
-
-    

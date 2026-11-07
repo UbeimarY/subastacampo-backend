@@ -65,4 +65,3 @@ class PricingModel:
             float(self._models[name].predict(frame)[0]) for name in QUANTILE_MODELS
         )
         return PricePerKg(low=low, median=median, high=high)
-    

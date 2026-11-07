@@ -5,15 +5,13 @@ from datetime import date, datetime, timedelta
 from google.protobuf.timestamp_pb2 import Timestamp
 
 from subastacampo.db.models import Product, ProductCategory, QuantityUnit, User, UserRole
-from subastacampo.v1 import common_pb2
-from subastacampo.v1.auth_pb2 import User as UserMessage
-from subastacampo.v1.catalog_pb2 import Product as ProductMessage
-
 from subastacampo.pricing.explanation import Factor, FactorCode
 from subastacampo.pricing.features import PriceFeatures
 from subastacampo.pricing.model import PricePerKg
-from subastacampo.v1 import catalog_pb2
+from subastacampo.v1 import catalog_pb2, common_pb2
+from subastacampo.v1.auth_pb2 import User as UserMessage
 from subastacampo.v1.catalog_pb2 import PriceFactor, PriceSuggestion
+from subastacampo.v1.catalog_pb2 import Product as ProductMessage
 from subastacampo.v1.common_pb2 import Money
 
 _ROLE_TO_PROTO = {
