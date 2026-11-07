@@ -8,6 +8,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from subastacampo.app import create_app
+from subastacampo.auctions.broker import AuctionEventBroker
 from subastacampo.calendar import BusinessCalendar
 from subastacampo.config import Settings
 from subastacampo.db import models  # noqa: F401  (registers every table)
@@ -17,6 +18,7 @@ TEST_JWT_SECRET = "test-secret-with-at-least-32-characters"
 
 # Every test sees the same business date, wherever and whenever it runs.
 TODAY = date(2026, 11, 4)
+NOW = datetime(2026, 11, 4, 15, 0, tzinfo=UTC)
 
 
 class FixedCalendar(BusinessCalendar):
@@ -26,9 +28,6 @@ class FixedCalendar(BusinessCalendar):
 
     def today(self) -> date:
         return self._today
-
-
-NOW = datetime(2026, 11, 4, 15, 0, tzinfo=UTC)
 
 
 class FakeClock:
@@ -44,11 +43,6 @@ class FakeClock:
         self._now += delta
 
 
-@pytest.fixture
-def clock() -> FakeClock:
-    return FakeClock(NOW)
-
-
 class _TestEnvironment(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
@@ -59,6 +53,16 @@ class _TestEnvironment(BaseSettings):
 def anyio_backend() -> str:
     """Run async tests on asyncio (the event loop Uvicorn uses)."""
     return "asyncio"
+
+
+@pytest.fixture
+def clock() -> FakeClock:
+    return FakeClock(NOW)
+
+
+@pytest.fixture
+def broker() -> AuctionEventBroker:
+    return AuctionEventBroker()
 
 
 @pytest.fixture
@@ -76,9 +80,18 @@ async def database_settings() -> AsyncIterator[Settings]:
 
 
 @pytest.fixture
-async def api(database_settings: Settings, clock: FakeClock) -> AsyncIterator[httpx.AsyncClient]:
+async def api(
+    database_settings: Settings, clock: FakeClock, broker: AuctionEventBroker
+) -> AsyncIterator[httpx.AsyncClient]:
     """HTTP client running the real app, including startup and shutdown."""
-    app = create_app(database_settings, calendar=FixedCalendar(TODAY), clock=clock)
+    app = create_app(
+        database_settings,
+        calendar=FixedCalendar(TODAY),
+        clock=clock,
+        broker=broker,
+        # Fast ticks so closing tests do not wait a full second.
+        closer_interval_seconds=0.05,
+    )
     async with LifespanManager(app) as manager:
         transport = httpx.ASGITransport(app=manager.app)
         async with httpx.AsyncClient(

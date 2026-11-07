@@ -1,6 +1,9 @@
 """Helpers to call Connect RPCs over HTTP with JSON, as a browser would."""
 
+import asyncio
 import base64
+import json
+from collections.abc import Callable
 from typing import Any
 
 import httpx
@@ -45,3 +48,48 @@ async def sign_up(client: httpx.AsyncClient, *, role: str, email: str) -> str:
 async def current_user_id(client: httpx.AsyncClient, token: str) -> str:
     response = await call(client, "AuthService", "GetCurrentUser", token=token)
     return str(response.json()["user"]["id"])
+
+
+async def stream_call(
+    client: httpx.AsyncClient,
+    service: str,
+    method: str,
+    body: dict[str, Any],
+    *,
+    token: str | None = None,
+) -> list[dict[str, Any]]:
+    """Calls a server-streaming RPC with the Connect protocol and returns every message.
+
+    Each message travels in an envelope: 1 flags byte, a 4-byte big-endian length,
+    then the JSON payload. Flag 0x02 marks the final end-of-stream envelope.
+    """
+    payload = json.dumps(body).encode()
+    headers = {"Content-Type": "application/connect+json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    response = await client.post(
+        f"/subastacampo.v1.{service}/{method}",
+        content=b"\x00" + len(payload).to_bytes(4, "big") + payload,
+        headers=headers,
+    )
+
+    messages: list[dict[str, Any]] = []
+    data, offset = response.content, 0
+    while offset < len(data):
+        flags = data[offset]
+        length = int.from_bytes(data[offset + 1 : offset + 5], "big")
+        message = json.loads(data[offset + 5 : offset + 5 + length] or b"{}")
+        offset += 5 + length
+        if flags & 0x02:
+            assert "error" not in message, message
+        else:
+            messages.append(message)
+    return messages
+
+
+async def wait_until(condition: Callable[[], bool], timeout: float = 2.0) -> None:
+    deadline = asyncio.get_running_loop().time() + timeout
+    while not condition():
+        if asyncio.get_running_loop().time() > deadline:
+            raise AssertionError("Condition not met in time")
+        await asyncio.sleep(0.01)
