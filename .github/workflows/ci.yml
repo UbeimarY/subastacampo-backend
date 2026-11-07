@@ -1,0 +1,88 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# Least privilege: the workflow only needs to read the code.
+permissions:
+  contents: read
+
+# A new push to the same branch cancels the previous, now outdated, run.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contract:
+    name: Contract (lint and breaking changes)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Buf
+        run: npm install --global @bufbuild/buf
+
+      - name: Lint the contract
+        run: buf lint
+
+      - name: Detect breaking changes against main
+        if: github.event_name == 'pull_request'
+        run: buf breaking --against "https://github.com/${{ github.repository }}.git#branch=main"
+
+  test:
+    name: Lint, migrations and tests
+    runs-on: ubuntu-latest
+    needs: contract
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: subasta
+          POSTGRES_PASSWORD: subasta
+          POSTGRES_DB: subastacampo_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U subasta -d subastacampo_test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://subasta:subasta@localhost:5432/subastacampo_test
+      TEST_DATABASE_URL: postgresql://subasta:subasta@localhost:5432/subastacampo_test
+      JWT_SECRET: ci-only-secret-with-at-least-32-characters
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Install Buf
+        run: npm install --global @bufbuild/buf
+
+      - name: Install dependencies (exactly as locked)
+        run: uv sync --locked
+
+      - name: Generate code from the contract
+        run: buf generate
+
+      - name: Lint
+        run: uv run ruff check .
+
+      - name: Check formatting
+        run: uv run ruff format --check .
+
+      - name: Apply migrations to an empty database
+        run: uv run alembic upgrade head
+
+      - name: Check models and migrations are in sync
+        run: uv run alembic check
+
+      - name: Run tests
+        run: uv run pytest -q
+
+        
