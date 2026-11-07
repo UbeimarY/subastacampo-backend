@@ -4,11 +4,25 @@ from datetime import date, datetime, timedelta
 
 from google.protobuf.timestamp_pb2 import Timestamp
 
-from subastacampo.db.models import Product, ProductCategory, QuantityUnit, User, UserRole
+from subastacampo.auctions.rules import minimum_next_bid
+from subastacampo.db.models import (
+    Auction,
+    AuctionStatus,
+    Bid,
+    Product,
+    ProductCategory,
+    QuantityUnit,
+    User,
+    UserRole,
+)
+from subastacampo.errors import validation_error
 from subastacampo.pricing.explanation import Factor, FactorCode
 from subastacampo.pricing.features import PriceFeatures
 from subastacampo.pricing.model import PricePerKg
-from subastacampo.v1 import catalog_pb2, common_pb2
+from subastacampo.v1 import auction_pb2, catalog_pb2, common_pb2
+from subastacampo.v1.auction_pb2 import Auction as AuctionMessage
+from subastacampo.v1.auction_pb2 import Bid as BidMessage
+from subastacampo.v1.auction_pb2 import RiskAssessment
 from subastacampo.v1.auth_pb2 import User as UserMessage
 from subastacampo.v1.catalog_pb2 import PriceFactor, PriceSuggestion
 from subastacampo.v1.catalog_pb2 import Product as ProductMessage
@@ -117,3 +131,83 @@ def to_price_suggestion(
         factors=[PriceFactor(code=_FACTOR_TO_PROTO[f.code], value=f.value) for f in factors],
         model_version=model_version,
     )
+
+
+CURRENCY = "COP"
+
+_STATUS_TO_PROTO = {
+    AuctionStatus.SCHEDULED: auction_pb2.AUCTION_STATUS_SCHEDULED,
+    AuctionStatus.ACTIVE: auction_pb2.AUCTION_STATUS_ACTIVE,
+    AuctionStatus.CLOSED: auction_pb2.AUCTION_STATUS_CLOSED,
+    AuctionStatus.CANCELLED: auction_pb2.AUCTION_STATUS_CANCELLED,
+}
+STATUS_FROM_PROTO = {proto: status for status, proto in _STATUS_TO_PROTO.items()}
+
+MEDIUM_RISK_SCORE = 30
+HIGH_RISK_SCORE = 60
+
+
+def money_units(value: Money, field: str) -> int:
+    """Reads an incoming amount. Only Colombian pesos are supported for now."""
+    if value.currency_code not in ("", CURRENCY):
+        raise validation_error(field, "Only COP amounts are supported")
+    return value.units
+
+
+def risk_level(score: int) -> int:
+    if score >= HIGH_RISK_SCORE:
+        return auction_pb2.RISK_LEVEL_HIGH
+    if score >= MEDIUM_RISK_SCORE:
+        return auction_pb2.RISK_LEVEL_MEDIUM
+    return auction_pb2.RISK_LEVEL_LOW
+
+
+def to_auction_message(auction: Auction, *, today: date) -> AuctionMessage:
+    """The auction's product must already be loaded."""
+    message = AuctionMessage(
+        id=str(auction.id),
+        product=to_product_message(auction.product, today=today),
+        starting_price=money(auction.starting_price),
+        min_increment=money(auction.min_increment),
+        current_price=money(auction.current_price),
+        next_min_bid=money(
+            minimum_next_bid(
+                starting_price=auction.starting_price,
+                current_price=auction.current_price,
+                min_increment=auction.min_increment,
+                bid_count=auction.bid_count,
+            )
+        ),
+        starts_at=to_timestamp(auction.starts_at),
+        ends_at=to_timestamp(auction.ends_at),
+        status=_STATUS_TO_PROTO[auction.status],
+        extension_count=auction.extension_count,
+        bid_count=auction.bid_count,
+    )
+    if auction.winner_id is not None:
+        message.winner_id = str(auction.winner_id)
+    return message
+
+
+def to_bid_message(bid: Bid, *, include_risk: bool) -> BidMessage:
+    message = BidMessage(
+        id=str(bid.id),
+        auction_id=str(bid.auction_id),
+        bidder_id=str(bid.bidder_id),
+        bidder_number=bid.bidder_number,
+        amount=money(bid.amount),
+        placed_at=to_timestamp(bid.placed_at),
+        extended_close=bid.extended_close,
+    )
+    if include_risk:
+        message.risk.CopyFrom(
+            RiskAssessment(
+                score=bid.risk_score,
+                level=risk_level(bid.risk_score),
+                signals=[
+                    auction_pb2.RiskSignal.Value(f"RISK_SIGNAL_{signal}")
+                    for signal in bid.risk_signals
+                ],
+            )
+        )
+    return message
