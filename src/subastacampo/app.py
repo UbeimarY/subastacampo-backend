@@ -10,12 +10,15 @@ from starlette.types import ASGIApp
 
 from subastacampo.auth.middleware import AuthenticationMiddleware
 from subastacampo.auth.tokens import TokenService
+from subastacampo.calendar import BusinessCalendar
 from subastacampo.config import Settings, get_settings
 from subastacampo.routing import ConnectRouter
 from subastacampo.services.auth import AuthServiceImpl
+from subastacampo.services.catalog import CatalogServiceImpl
 from subastacampo.services.system import SystemServiceImpl
-from subastacampo.v1 import auth_pb2, system_pb2
+from subastacampo.v1 import auth_pb2, catalog_pb2, system_pb2
 from subastacampo.v1.auth_connect import AuthServiceASGIApplication
+from subastacampo.v1.catalog_connect import CatalogServiceASGIApplication
 from subastacampo.v1.system_connect import SystemServiceASGIApplication
 
 # Headers the browser client sends; CORS must allow them explicitly.
@@ -28,8 +31,11 @@ CONNECT_REQUEST_HEADERS = [
 ]
 
 
-def create_app(settings: Settings | None = None) -> ASGIApp:
+def create_app(
+    settings: Settings | None = None, *, calendar: BusinessCalendar | None = None
+) -> ASGIApp:
     settings = settings or get_settings()
+    calendar = calendar or BusinessCalendar(settings.business_timezone)
 
     engine = create_async_engine(settings.database_url, pool_pre_ping=True)
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
@@ -42,6 +48,9 @@ def create_app(settings: Settings | None = None) -> ASGIApp:
         ),
         _service_name(auth_pb2, "AuthService"): AuthServiceASGIApplication(
             AuthServiceImpl(session_factory, tokens)
+        ),
+        _service_name(catalog_pb2, "CatalogService"): CatalogServiceASGIApplication(
+            CatalogServiceImpl(session_factory, calendar)
         ),
     }
 
