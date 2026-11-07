@@ -1,4 +1,5 @@
 from collections.abc import AsyncIterator
+from datetime import date
 
 import httpx
 import pytest
@@ -7,12 +8,10 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from subastacampo.app import create_app
+from subastacampo.calendar import BusinessCalendar
 from subastacampo.config import Settings
 from subastacampo.db import models  # noqa: F401  (registers every table)
 from subastacampo.db.base import Base
-
-from datetime import date
-from subastacampo.calendar import BusinessCalendar
 
 TEST_JWT_SECRET = "test-secret-with-at-least-32-characters"
 
@@ -58,9 +57,8 @@ async def database_settings() -> AsyncIterator[Settings]:
 @pytest.fixture
 async def api(database_settings: Settings) -> AsyncIterator[httpx.AsyncClient]:
     """HTTP client running the real app, including startup and shutdown."""
-    async with LifespanManagercreate_app(
-        database_settings, calendar=FixedCalendar(TODAY)
-    ) as manager:
+    app = create_app(database_settings, calendar=FixedCalendar(TODAY))
+    async with LifespanManager(app) as manager:
         transport = httpx.ASGITransport(app=manager.app)
         async with httpx.AsyncClient(
             transport=transport,
