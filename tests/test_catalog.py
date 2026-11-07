@@ -132,3 +132,37 @@ async def test_listing_filters_by_category(api: httpx.AsyncClient) -> None:
     )
 
     assert [p["name"] for p in response.json()["products"]] == ["Mora"]
+
+
+async def test_owner_gets_an_explained_price_suggestion(api: httpx.AsyncClient) -> None:
+    token = await sign_up(api, role=PRODUCER, email="productor@test.com")
+    product_id = (await create_product(api, token)).json()["product"]["id"]
+
+    response = await call(
+        api, "CatalogService", "SuggestPrice", {"productId": product_id}, token=token
+    )
+
+    assert response.status_code == 200
+    suggestion = response.json()["suggestion"]
+    # Proto3 JSON encodes int64 as a string to avoid precision loss in JavaScript.
+    low = int(suggestion["rangeMin"]["units"])
+    suggested = int(suggestion["suggestedPrice"]["units"])
+    high = int(suggestion["rangeMax"]["units"])
+    assert 0 < low <= suggested <= high
+    assert suggestion["quantityKg"] == 1000
+    assert suggestion["modelVersion"].startswith("price-v1-")
+    codes = {factor["code"] for factor in suggestion["factors"]}
+    assert "PRICE_FACTOR_CODE_LARGE_VOLUME" in codes
+
+
+async def test_only_the_owner_gets_a_price_suggestion(api: httpx.AsyncClient) -> None:
+    owner = await sign_up(api, role=PRODUCER, email="duena@test.com")
+    other = await sign_up(api, role=PRODUCER, email="otro@test.com")
+    product_id = (await create_product(api, owner)).json()["product"]["id"]
+
+    response = await call(
+        api, "CatalogService", "SuggestPrice", {"productId": product_id}, token=other
+    )
+
+    assert response.status_code == 403
+    assert error_detail(response).reason == common_pb2.ERROR_REASON_NOT_PRODUCT_OWNER
