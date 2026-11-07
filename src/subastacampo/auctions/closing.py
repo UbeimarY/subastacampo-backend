@@ -40,5 +40,3 @@ async def close_if_due(session: AsyncSession, auction: Auction, now: datetime) -
     )
     auction.status = AuctionStatus.CLOSED
     return True
-
-    

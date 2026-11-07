@@ -55,4 +55,3 @@ async def gather_facts(
         account_age=now - bidder.created_at,
         shares_phone_with_producer=same_phone(bidder.phone, producer_phone),
     )
-

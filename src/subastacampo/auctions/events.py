@@ -47,5 +47,3 @@ def redact_for(event: WatchAuctionResponse, *, include_risk: bool) -> WatchAucti
     redacted.CopyFrom(event)
     redacted.bid_placed.bid.ClearField("risk")
     return redacted
-
-    

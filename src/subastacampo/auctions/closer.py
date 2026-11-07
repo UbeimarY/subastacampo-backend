@@ -72,4 +72,3 @@ class AuctionCloser:
                 # A transient failure (e.g. a database restart) must not kill the loop.
                 logger.exception("Closing expired auctions failed")
             await asyncio.sleep(self._interval)
-            

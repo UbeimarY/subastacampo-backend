@@ -136,7 +136,7 @@ class Auction(Base):
         ),
         # Used by the background task that closes expired auctions.
         Index("ix_auctions_status_ends_at", "status", "ends_at"),
-                # Newest-first listing with keyset pagination (created_at, id).
+        # Newest-first listing with keyset pagination (created_at, id).
         Index("ix_auctions_created_at_id", "created_at", "id"),
     )
 

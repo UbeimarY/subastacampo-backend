@@ -75,5 +75,3 @@ class AuctionEventBroker:
         subscriptions.discard(subscription)
         if not subscriptions:
             del self._subscriptions[auction_id]
-
-            
