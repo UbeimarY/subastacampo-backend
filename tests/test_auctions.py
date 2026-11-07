@@ -69,16 +69,6 @@ async def bid(
     )
 
 
-@pytest.fixture
-async def producer(api: httpx.AsyncClient) -> str:
-    return await sign_up(api, role="USER_ROLE_PRODUCER", email="productor@test.com")
-
-
-@pytest.fixture
-async def buyer(api: httpx.AsyncClient) -> str:
-    return await sign_up(api, role="USER_ROLE_BUYER", email="comprador@test.com")
-
-
 async def test_producer_starts_an_auction(api: httpx.AsyncClient, producer: str) -> None:
     auction = await start_auction(api, producer)
 

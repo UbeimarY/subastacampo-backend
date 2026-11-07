@@ -13,6 +13,7 @@ from subastacampo.calendar import BusinessCalendar
 from subastacampo.config import Settings
 from subastacampo.db import models  # noqa: F401  (registers every table)
 from subastacampo.db.base import Base
+from tests.rpc import sign_up
 
 TEST_JWT_SECRET = "test-secret-with-at-least-32-characters"
 
@@ -100,3 +101,13 @@ async def api(
             headers={"Connect-Protocol-Version": "1"},
         ) as client:
             yield client
+
+
+@pytest.fixture
+async def producer(api: httpx.AsyncClient) -> str:
+    return await sign_up(api, role="USER_ROLE_PRODUCER", email="productor@test.com")
+
+
+@pytest.fixture
+async def buyer(api: httpx.AsyncClient) -> str:
+    return await sign_up(api, role="USER_ROLE_BUYER", email="comprador@test.com")
