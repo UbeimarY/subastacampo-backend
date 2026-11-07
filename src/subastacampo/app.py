@@ -21,6 +21,8 @@ from subastacampo.v1.auth_connect import AuthServiceASGIApplication
 from subastacampo.v1.catalog_connect import CatalogServiceASGIApplication
 from subastacampo.v1.system_connect import SystemServiceASGIApplication
 
+from subastacampo.pricing.model import PricingModel
+
 # Headers the browser client sends; CORS must allow them explicitly.
 CONNECT_REQUEST_HEADERS = [
     "authorization",
@@ -40,6 +42,8 @@ def create_app(
     engine = create_async_engine(settings.database_url, pool_pre_ping=True)
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
     tokens = TokenService(settings.jwt_secret, timedelta(minutes=settings.jwt_expire_minutes))
+    # Fail fast: without a valid model the server must not start.
+    pricing = PricingModel.load()
     app_version = version("subastacampo")
 
     services: dict[str, ASGIApp] = {
@@ -50,7 +54,7 @@ def create_app(
             AuthServiceImpl(session_factory, tokens)
         ),
         _service_name(catalog_pb2, "CatalogService"): CatalogServiceASGIApplication(
-            CatalogServiceImpl(session_factory, calendar)
+            CatalogServiceImpl(session_factory, calendar, pricing)
         ),
     }
 

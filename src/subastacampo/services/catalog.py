@@ -1,23 +1,32 @@
-"""Harvest publication and product listing."""
+"""Harvest publication, product listing and AI-assisted pricing."""
 
+import asyncio
 import math
 import uuid
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
 from connectrpc.code import Code
 from connectrpc.errors import ConnectError
 from connectrpc.request import RequestContext
-from sqlalchemy import select, tuple_
+from sqlalchemy import func, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from subastacampo.auth.principal import require_principal
 from subastacampo.calendar import BusinessCalendar
-from subastacampo.db.models import Product, UserRole
+from subastacampo.db.models import Auction, Product, ProductCategory, UserRole
 from subastacampo.errors import rpc_error, validation_error
-from subastacampo.mappers import CATEGORY_FROM_PROTO, UNIT_FROM_PROTO, to_product_message
+from subastacampo.mappers import (
+    CATEGORY_FROM_PROTO,
+    UNIT_FROM_PROTO,
+    to_price_suggestion,
+    to_product_message,
+)
 from subastacampo.pagination import Cursor, decode_cursor, encode_cursor, resolve_page_size
+from subastacampo.pricing.explanation import explain
+from subastacampo.pricing.features import DEFAULT_CATEGORY_DEMAND, build_features
+from subastacampo.pricing.model import PricingModel
 from subastacampo.v1 import common_pb2
 from subastacampo.v1.catalog_connect import CatalogService
 from subastacampo.v1.catalog_pb2 import (
@@ -33,14 +42,19 @@ from subastacampo.v1.catalog_pb2 import (
 
 MAX_QUANTITY = Decimal("1000000")
 _CENT = Decimal("0.01")
+DEMAND_WINDOW = timedelta(days=30)
 
 
 class CatalogServiceImpl(CatalogService):
     def __init__(
-        self, session_factory: async_sessionmaker[AsyncSession], calendar: BusinessCalendar
+        self,
+        session_factory: async_sessionmaker[AsyncSession],
+        calendar: BusinessCalendar,
+        pricing: PricingModel,
     ) -> None:
         self._session_factory = session_factory
         self._calendar = calendar
+        self._pricing = pricing
 
     async def create_product(
         self,
@@ -115,8 +129,53 @@ class CatalogServiceImpl(CatalogService):
         request: SuggestPriceRequest,
         ctx: RequestContext[SuggestPriceRequest, SuggestPriceResponse],
     ) -> SuggestPriceResponse:
-        # Implemented in the next step, together with the pricing model.
-        raise ConnectError(Code.UNIMPLEMENTED, "Price suggestion is not available yet")
+        principal = require_principal(role=UserRole.PRODUCER)
+        product_id = _parse_product_id(request.product_id)
+
+        async with self._session_factory() as session:
+            product = await session.get(Product, product_id)
+            if product is None:
+                raise _product_not_found()
+            if product.producer_id != principal.user_id:
+                raise rpc_error(
+                    Code.PERMISSION_DENIED,
+                    common_pb2.ERROR_REASON_NOT_PRODUCT_OWNER,
+                    "Only the product's producer can request a price suggestion",
+                )
+            demand = await _category_demand(session, product.category)
+
+        features = build_features(
+            category=product.category,
+            quantity=float(product.quantity),
+            unit=product.unit,
+            harvest_date=product.harvest_date,
+            shelf_life_days=product.shelf_life_days,
+            today=self._calendar.today(),
+            category_demand=demand if demand is not None else DEFAULT_CATEGORY_DEMAND,
+        )
+
+        # CPU-bound inference runs in a worker thread: the event loop stays free
+        # to serve live auction streams meanwhile.
+        prediction = await asyncio.to_thread(self._pricing.predict, features)
+
+        suggestion = to_price_suggestion(
+            features,
+            prediction,
+            explain(features, has_demand_data=demand is not None),
+            model_version=self._pricing.version,
+        )
+        return SuggestPriceResponse(suggestion=suggestion)
+
+
+async def _category_demand(session: AsyncSession, category: ProductCategory) -> float | None:
+    """Average bids per auction in the category during the demand window."""
+    since = datetime.now(UTC) - DEMAND_WINDOW
+    average = await session.scalar(
+        select(func.avg(Auction.bid_count))
+        .join(Product, Auction.product_id == Product.id)
+        .where(Product.category == category, Auction.starts_at >= since)
+    )
+    return float(average) if average is not None else None
 
 
 def _validated_fields(request: CreateProductRequest, today: date) -> dict[str, Any]:

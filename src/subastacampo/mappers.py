@@ -9,6 +9,13 @@ from subastacampo.v1 import common_pb2
 from subastacampo.v1.auth_pb2 import User as UserMessage
 from subastacampo.v1.catalog_pb2 import Product as ProductMessage
 
+from subastacampo.pricing.explanation import Factor, FactorCode
+from subastacampo.pricing.features import PriceFeatures
+from subastacampo.pricing.model import PricePerKg
+from subastacampo.v1 import catalog_pb2
+from subastacampo.v1.catalog_pb2 import PriceFactor, PriceSuggestion
+from subastacampo.v1.common_pb2 import Money
+
 _ROLE_TO_PROTO = {
     UserRole.PRODUCER: common_pb2.USER_ROLE_PRODUCER,
     UserRole.BUYER: common_pb2.USER_ROLE_BUYER,
@@ -35,6 +42,7 @@ def to_user_message(user: User) -> UserMessage:
     if user.municipality is not None:
         message.municipality = user.municipality
     return message
+
 
 _CATEGORY_TO_PROTO = {
     ProductCategory.FRUITS: common_pb2.PRODUCT_CATEGORY_FRUITS,
@@ -75,3 +83,39 @@ def to_product_message(product: Product, *, today: date) -> ProductMessage:
         created_at=to_timestamp(product.created_at),
     )
 
+
+_FACTOR_TO_PROTO = {
+    FactorCode.FRESH_PRODUCT: catalog_pb2.PRICE_FACTOR_CODE_FRESH_PRODUCT,
+    FactorCode.SHORT_SHELF_LIFE: catalog_pb2.PRICE_FACTOR_CODE_SHORT_SHELF_LIFE,
+    FactorCode.HIGH_DEMAND: catalog_pb2.PRICE_FACTOR_CODE_HIGH_DEMAND,
+    FactorCode.LOW_DEMAND: catalog_pb2.PRICE_FACTOR_CODE_LOW_DEMAND,
+    FactorCode.LARGE_VOLUME: catalog_pb2.PRICE_FACTOR_CODE_LARGE_VOLUME,
+}
+
+
+def money(units: int) -> Money:
+    return Money(currency_code="COP", units=units)
+
+
+def round_to(value: float, step: int) -> int:
+    return int(round(value / step)) * step
+
+
+def to_price_suggestion(
+    features: PriceFeatures,
+    prediction: PricePerKg,
+    factors: list[Factor],
+    *,
+    model_version: str,
+) -> PriceSuggestion:
+    kg = features.quantity_kg
+    return PriceSuggestion(
+        suggested_price=money(round_to(prediction.median * kg, 100)),
+        range_min=money(round_to(prediction.low * kg, 100)),
+        range_max=money(round_to(prediction.high * kg, 100)),
+        price_per_kg=money(round_to(prediction.median, 10)),
+        quantity_kg=kg,
+        category_demand=features.category_demand,
+        factors=[PriceFactor(code=_FACTOR_TO_PROTO[f.code], value=f.value) for f in factors],
+        model_version=model_version,
+    )
