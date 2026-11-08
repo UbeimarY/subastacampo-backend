@@ -1,7 +1,7 @@
 """ASGI application factory: wires settings, database and Connect services."""
 
 from datetime import timedelta
-from importlib.metadata import version
+from importlib.metadata import PackageNotFoundError, version
 from types import ModuleType
 
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -55,7 +55,7 @@ def create_app(
     tokens = TokenService(settings.jwt_secret, timedelta(minutes=settings.jwt_expire_minutes))
     # Fail fast: without a valid model the server must not start.
     pricing = PricingModel.load()
-    app_version = version("subastacampo")
+    app_version = _app_version()
 
     services: dict[str, ASGIApp] = {
         _service_name(system_pb2, "SystemService"): SystemServiceASGIApplication(
@@ -94,3 +94,11 @@ def create_app(
 def _service_name(module: ModuleType, service: str) -> str:
     """Fully qualified name taken from the contract itself, never hard-coded."""
     return module.DESCRIPTOR.services_by_name[service].full_name
+
+
+def _app_version() -> str:
+    """Installed package version, or a marker when running from a source checkout."""
+    try:
+        return version("subastacampo")
+    except PackageNotFoundError:
+        return "0.0.0+source"
