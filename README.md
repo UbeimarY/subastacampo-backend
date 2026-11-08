@@ -1,5 +1,7 @@
 # SubastaCampo · Backend
 
+[![CI](https://github.com/UbeimarY/subastacampo-backend/actions/workflows/ci.yml/badge.svg)](https://github.com/UbeimarY/subastacampo-backend/actions/workflows/ci.yml)
+
 Real-time auction API for small farmers, built **contract-first** with Protocol Buffers.
 Bids are streamed live to every participant over server streaming RPCs.
 
@@ -17,7 +19,7 @@ The same service speaks two protocols from a single `.proto` contract:
 | Server | Uvicorn |
 | Database | PostgreSQL, SQLAlchemy 2, Alembic |
 | AI | scikit-learn (price suggestion) + risk scoring for suspicious bids |
-| Tooling | uv, Ruff, pytest |
+| Tooling | uv, Ruff, pytest, GitHub Actions |
 
 ## Related repositories
 
