@@ -7,7 +7,7 @@ primary_region = "iad"
 
 [env]
   BUSINESS_TIMEZONE = "America/Bogota"
-  CORS_ORIGINS = '["http://localhost:4200"]'
+  CORS_ORIGINS = '["http://localhost:4200","https://subastacampo-ubeimar.netlify.app"]'
 
 [http_service]
   internal_port = 8000
