@@ -6,8 +6,8 @@ inputs:
     description: Buf version to install
     default: "1.50.0"
   sha256:
-    # From the release's sha256.txt (buf-Linux-x86_64), cross-checked with the npm package.
-    description: Expected SHA-256 of buf-Linux-x86_64 for that version
+    # Same value as buf-Linux-x86_64 in the GitHub release's sha256.txt.
+    description: Expected SHA-256 of the Linux x86_64 binary for that version
     default: "154ea883ce098eac4fa106ff9ee4e4964bb97f809dd8ec9c34a432b466ce1494"
 
 runs:
@@ -22,17 +22,17 @@ runs:
         set -euo pipefail
         workdir="$RUNNER_TEMP/buf"
         mkdir -p "$workdir" && cd "$workdir"
-        url="https://github.com/bufbuild/buf/releases/download/v${BUF_VERSION}/buf-Linux-x86_64"
-        # HTTPS only, including any redirect, with modern TLS.
-        # Release downloads sometimes answer 502/504: retry a few times before failing.
+        # Buf's official npm package ships the same binary as the GitHub release,
+        # and the npm registry is far more reliable than release downloads in CI.
+        url="https://registry.npmjs.org/@bufbuild/buf-linux-x64/-/buf-linux-x64-${BUF_VERSION}.tgz"
+        # HTTPS only, including any redirect, with modern TLS; retry transient errors.
         curl --retry 4 --retry-delay 5 --retry-all-errors \
-          --proto '=https' --proto-redir '=https' --tlsv1.2 -sSfLO "$url"
-        # The checksum lives in this repository, not on the download server:
-        # refuse to continue if the binary does not match it.
-        echo "${BUF_SHA256}  buf-Linux-x86_64" | sha256sum --check --strict
+          --proto '=https' --proto-redir '=https' --tlsv1.2 -sSfL -o buf.tgz "$url"
+        tar -xzf buf.tgz package/bin/buf
+        # The checksum lives in this repository: refuse a binary that does not match it.
+        echo "${BUF_SHA256}  package/bin/buf" | sha256sum --check --strict
         mkdir -p "$HOME/.local/bin"
-        install -m 0755 buf-Linux-x86_64 "$HOME/.local/bin/buf"
+        install -m 0755 package/bin/buf "$HOME/.local/bin/buf"
         echo "$HOME/.local/bin" >> "$GITHUB_PATH"
         "$HOME/.local/bin/buf" --version
-
         
