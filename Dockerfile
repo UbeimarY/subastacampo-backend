@@ -13,8 +13,9 @@ ENV UV_COMPILE_BYTECODE=1 \
     UV_PYTHON_DOWNLOADS=never
 
 # Dependencies first: this layer stays cached until uv.lock changes.
+# Prebuilt wheels only: no third-party build scripts run inside the image.
 COPY pyproject.toml uv.lock .python-version ./
-RUN uv sync --locked --no-dev --no-install-project
+RUN uv sync --locked --no-dev --no-build --no-install-project
 
 # Contract and source code, then generate the RPC code from the contract.
 COPY buf.yaml buf.gen.yaml ./
@@ -24,8 +25,6 @@ RUN buf generate
 
 COPY alembic.ini ./
 COPY migrations ./migrations
-# The project is installed into the virtual environment: the image is self-contained.
-RUN uv sync --locked --no-dev --no-editable
 
 # ---------- Runtime stage: only what is needed to run ----------
 FROM python:3.11-slim
@@ -35,7 +34,9 @@ RUN useradd --create-home --uid 1000 app
 WORKDIR /app
 COPY --from=build --chown=app:app /app /app
 
+# The project runs from source: no build step for our own package either.
 ENV PATH="/app/.venv/bin:$PATH" \
+    PYTHONPATH="/app/src" \
     PYTHONUNBUFFERED=1
 USER app
 EXPOSE 8000
