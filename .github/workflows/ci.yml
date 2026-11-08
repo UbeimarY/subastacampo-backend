@@ -53,6 +53,8 @@ jobs:
     env:
       DATABASE_URL: postgresql://subasta@localhost:5432/subastacampo_test
       TEST_DATABASE_URL: postgresql://subasta@localhost:5432/subastacampo_test
+      # The project runs from source: no build step, so no build scripts run.
+      PYTHONPATH: src
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
@@ -66,8 +68,8 @@ jobs:
       - name: Generate a throwaway JWT secret for this run
         run: echo "JWT_SECRET=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
 
-      - name: Install dependencies exactly as locked
-        run: uv sync --locked
+      - name: Install locked dependencies from prebuilt wheels only
+        run: uv sync --locked --no-build --no-install-project
 
       - name: Use the project's virtual environment
         run: echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
@@ -89,4 +91,5 @@ jobs:
 
       - name: Run tests
         run: pytest -q
+
         
