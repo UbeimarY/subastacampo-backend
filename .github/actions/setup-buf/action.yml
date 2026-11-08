@@ -18,8 +18,9 @@ runs:
         workdir="$RUNNER_TEMP/buf"
         mkdir -p "$workdir" && cd "$workdir"
         base="https://github.com/bufbuild/buf/releases/download/v${BUF_VERSION}"
-        curl -sSfLO "$base/buf-Linux-x86_64"
-        curl -sSfLO "$base/sha256.txt"
+        # HTTPS only, including any redirect, with modern TLS.
+        curl --proto '=https' --proto-redir '=https' --tlsv1.2 -sSfLO "$base/buf-Linux-x86_64"
+        curl --proto '=https' --proto-redir '=https' --tlsv1.2 -sSfLO "$base/sha256.txt"
         # Refuse to continue if the binary does not match the published checksum.
         grep " buf-Linux-x86_64$" sha256.txt | sha256sum --check --strict
         mkdir -p "$HOME/.local/bin"
