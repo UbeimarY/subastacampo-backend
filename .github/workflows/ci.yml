@@ -19,10 +19,10 @@ jobs:
     name: Contract (lint and breaking changes)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      # Every action is pinned to a full commit SHA (supply-chain safety).
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - name: Install Buf
-        run: npm install --global @bufbuild/buf
+      - uses: ./.github/actions/setup-buf
 
       - name: Lint the contract
         run: buf lint
@@ -40,8 +40,9 @@ jobs:
         image: postgres:17
         env:
           POSTGRES_USER: subasta
-          POSTGRES_PASSWORD: subasta
           POSTGRES_DB: subastacampo_test
+          # Throwaway container that only lives on this runner: no password to leak.
+          POSTGRES_HOST_AUTH_METHOD: trust
         ports:
           - 5432:5432
         options: >-
@@ -50,39 +51,42 @@ jobs:
           --health-timeout 3s
           --health-retries 10
     env:
-      DATABASE_URL: postgresql://subasta:subasta@localhost:5432/subastacampo_test
-      TEST_DATABASE_URL: postgresql://subasta:subasta@localhost:5432/subastacampo_test
-      JWT_SECRET: ci-only-secret-with-at-least-32-characters
+      DATABASE_URL: postgresql://subasta@localhost:5432/subastacampo_test
+      TEST_DATABASE_URL: postgresql://subasta@localhost:5432/subastacampo_test
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v6
+        uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
         with:
           enable-cache: true
 
-      - name: Install Buf
-        run: npm install --global @bufbuild/buf
+      - uses: ./.github/actions/setup-buf
 
-      - name: Install dependencies (exactly as locked)
+      - name: Generate a throwaway JWT secret for this run
+        run: echo "JWT_SECRET=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
+
+      - name: Install dependencies exactly as locked
         run: uv sync --locked
+
+      - name: Use the project's virtual environment
+        run: echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
 
       - name: Generate code from the contract
         run: buf generate
 
       - name: Lint
-        run: uv run ruff check .
+        run: ruff check .
 
       - name: Check formatting
-        run: uv run ruff format --check .
+        run: ruff format --check .
 
       - name: Apply migrations to an empty database
-        run: uv run alembic upgrade head
+        run: alembic upgrade head
 
       - name: Check models and migrations are in sync
-        run: uv run alembic check
+        run: alembic check
 
       - name: Run tests
-        run: uv run pytest -q
-
+        run: pytest -q
         
