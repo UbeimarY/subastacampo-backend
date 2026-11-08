@@ -1,7 +1,9 @@
 """ASGI application factory: wires settings, database and Connect services."""
 
+import tomllib
 from datetime import timedelta
 from importlib.metadata import PackageNotFoundError, version
+from pathlib import Path
 from types import ModuleType
 
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -35,6 +37,9 @@ CONNECT_REQUEST_HEADERS = [
     "connect-timeout-ms",
     "x-user-agent",
 ]
+
+# src/subastacampo/app.py -> repository root, where pyproject.toml lives.
+_PYPROJECT = Path(__file__).resolve().parents[2] / "pyproject.toml"
 
 
 def create_app(
@@ -97,8 +102,12 @@ def _service_name(module: ModuleType, service: str) -> str:
 
 
 def _app_version() -> str:
-    """Installed package version, or a marker when running from a source checkout."""
+    """Installed package version; from a source checkout, read from pyproject.toml.
+
+    Either way the version has a single source of truth: pyproject.toml.
+    """
     try:
         return version("subastacampo")
     except PackageNotFoundError:
-        return "0.0.0+source"
+        with _PYPROJECT.open("rb") as file:
+            return str(tomllib.load(file)["project"]["version"])

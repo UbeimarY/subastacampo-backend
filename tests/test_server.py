@@ -54,3 +54,17 @@ def test_settings_normalize_database_driver() -> None:
     settings = Settings(database_url="postgres://user:pass@host:5432/db", jwt_secret="x")
 
     assert settings.database_url == "postgresql+asyncpg://user:pass@host:5432/db"
+
+
+def test_settings_adapt_libpq_options_for_asyncpg() -> None:
+    settings = Settings(
+        database_url=(
+            "postgresql://user:pass@ep-demo.us-east-1.aws.neon.tech/neondb"
+            "?sslmode=require&channel_binding=require"
+        ),
+        jwt_secret=TEST_JWT_SECRET,
+    )
+
+    assert settings.database_url == (
+        "postgresql+asyncpg://user:pass@ep-demo.us-east-1.aws.neon.tech/neondb?ssl=require"
+    )
