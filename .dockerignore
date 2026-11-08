@@ -1,0 +1,12 @@
+.git
+.github
+.venv
+.env
+.env.*
+**/__pycache__
+.pytest_cache
+.ruff_cache
+tests
+docker-compose.yml
+# Generated code is rebuilt inside the image from the contract
+src/subastacampo/v1
