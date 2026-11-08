@@ -1,0 +1,95 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# Least privilege: the workflow only needs to read the code.
+permissions:
+  contents: read
+
+# A new push to the same branch cancels the previous, now outdated, run.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contract:
+    name: Contract (lint and breaking changes)
+    runs-on: ubuntu-latest
+    steps:
+      # Every action is pinned to a full commit SHA (supply-chain safety).
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: ./.github/actions/setup-buf
+
+      - name: Lint the contract
+        run: buf lint
+
+      - name: Detect breaking changes against main
+        if: github.event_name == 'pull_request'
+        run: buf breaking --against "https://github.com/${{ github.repository }}.git#branch=main"
+
+  test:
+    name: Lint, migrations and tests
+    runs-on: ubuntu-latest
+    needs: contract
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: subasta
+          POSTGRES_DB: subastacampo_test
+          # Throwaway container that only lives on this runner: no password to leak.
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U subasta -d subastacampo_test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://subasta@localhost:5432/subastacampo_test
+      TEST_DATABASE_URL: postgresql://subasta@localhost:5432/subastacampo_test
+      # The project runs from source: no build step, so no build scripts run.
+      PYTHONPATH: src
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
+        with:
+          enable-cache: true
+
+      - uses: ./.github/actions/setup-buf
+
+      - name: Generate a throwaway JWT secret for this run
+        run: echo "JWT_SECRET=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
+
+      - name: Install locked dependencies from prebuilt wheels only
+        run: uv sync --locked --no-build --no-install-project
+
+      - name: Use the project's virtual environment
+        run: echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+
+      - name: Generate code from the contract
+        run: buf generate
+
+      - name: Lint
+        run: ruff check .
+
+      - name: Check formatting
+        run: ruff format --check .
+
+      - name: Apply migrations to an empty database
+        run: alembic upgrade head
+
+      - name: Check models and migrations are in sync
+        run: alembic check
+
+      - name: Run tests
+        run: pytest -q
+
+        

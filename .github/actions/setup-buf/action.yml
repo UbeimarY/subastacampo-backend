@@ -1,0 +1,31 @@
+name: Set up Buf
+description: Installs a pinned Buf release and verifies its SHA-256 checksum.
+
+inputs:
+  version:
+    description: Buf version to install
+    default: "1.50.0"
+
+runs:
+  using: composite
+  steps:
+    - name: Download and verify Buf
+      shell: bash
+      env:
+        BUF_VERSION: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+        workdir="$RUNNER_TEMP/buf"
+        mkdir -p "$workdir" && cd "$workdir"
+        base="https://github.com/bufbuild/buf/releases/download/v${BUF_VERSION}"
+        # HTTPS only, including any redirect, with modern TLS.
+        curl --proto '=https' --proto-redir '=https' --tlsv1.2 -sSfLO "$base/buf-Linux-x86_64"
+        curl --proto '=https' --proto-redir '=https' --tlsv1.2 -sSfLO "$base/sha256.txt"
+        # Refuse to continue if the binary does not match the published checksum.
+        grep " buf-Linux-x86_64$" sha256.txt | sha256sum --check --strict
+        mkdir -p "$HOME/.local/bin"
+        install -m 0755 buf-Linux-x86_64 "$HOME/.local/bin/buf"
+        echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+        "$HOME/.local/bin/buf" --version
+
+        

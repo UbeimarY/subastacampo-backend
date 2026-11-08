@@ -1,0 +1,7 @@
+version: 2
+updates:
+  # Pinned action SHAs are safe but static: Dependabot proposes updates as PRs.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
