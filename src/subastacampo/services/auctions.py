@@ -32,6 +32,7 @@ from subastacampo.clock import Clock
 from subastacampo.db.models import Auction, AuctionStatus, Bid, Product, User, UserRole
 from subastacampo.errors import rpc_error, validation_error
 from subastacampo.mappers import (
+    ROLE_TO_PROTO,
     STATUS_FROM_PROTO,
     money,
     money_units,
@@ -45,8 +46,11 @@ from subastacampo.risk.scoring import score_bid
 from subastacampo.v1 import auction_pb2, common_pb2
 from subastacampo.v1.auction_connect import AuctionService
 from subastacampo.v1.auction_pb2 import (
+    AuctionContact,
     CreateAuctionRequest,
     CreateAuctionResponse,
+    GetAuctionContactRequest,
+    GetAuctionContactResponse,
     GetAuctionRequest,
     GetAuctionResponse,
     ListAuctionsRequest,
@@ -314,6 +318,49 @@ class AuctionServiceImpl(AuctionService):
                 yield redact_for(event, include_risk=include_risk)
                 if event.WhichOneof("event") == "auction_closed":
                     return
+
+    async def get_auction_contact(
+        self,
+        request: GetAuctionContactRequest,
+        ctx: RequestContext[GetAuctionContactRequest, GetAuctionContactResponse],
+    ) -> GetAuctionContactResponse:
+        principal = require_principal()
+        auction_id = _parse_id(request.auction_id, _auction_not_found)
+        async with self._session_factory() as session:
+            # Closes the auction first if its time is already up.
+            auction, _ = await self._load_detail(session, auction_id)
+            if auction.status != AuctionStatus.CLOSED or auction.winner_id is None:
+                raise rpc_error(
+                    Code.FAILED_PRECONDITION,
+                    common_pb2.ERROR_REASON_AUCTION_HAS_NO_WINNER,
+                    "Contacts are shared only after the auction closes with a winner",
+                )
+
+            producer_id = auction.product.producer_id
+            if principal.user_id == producer_id:
+                other_id = auction.winner_id
+            elif principal.user_id == auction.winner_id:
+                other_id = producer_id
+            else:
+                # Other bidders and strangers learn nothing about either party.
+                raise rpc_error(
+                    Code.PERMISSION_DENIED,
+                    common_pb2.ERROR_REASON_NOT_AUCTION_PARTY,
+                    "Only the producer and the winner can see these contacts",
+                )
+            other = await session.get(User, other_id)
+            assert other is not None
+
+        contact = AuctionContact(
+            role=ROLE_TO_PROTO[other.role],
+            full_name=other.full_name,
+            email=other.email,
+        )
+        if other.phone:
+            contact.phone = other.phone
+        if other.municipality:
+            contact.municipality = other.municipality
+        return GetAuctionContactResponse(contact=contact, final_price=money(auction.current_price))
 
     async def _load_detail(
         self, session: AsyncSession, auction_id: uuid.UUID

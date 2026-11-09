@@ -59,6 +59,10 @@ enum ErrorReason {
   ERROR_REASON_AUCTION_NOT_ACTIVE = 12;
   ERROR_REASON_BID_TOO_LOW = 13;
   ERROR_REASON_AUTHENTICATION_REQUIRED = 14;
+  // The auction has not closed yet, or closed without bids.
+  ERROR_REASON_AUCTION_HAS_NO_WINNER = 15;
+  // Only the producer and the winner of a closed auction can see its contacts.
+  ERROR_REASON_NOT_AUCTION_PARTY = 16;
 }
 
 // Machine-readable error information, sent as a Connect error detail.

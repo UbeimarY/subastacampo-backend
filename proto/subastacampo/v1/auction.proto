@@ -23,6 +23,13 @@ service AuctionService {
   // Streams live events of one auction. The first message is always a full
   // snapshot, so a client that (re)connects never misses any state.
   rpc WatchAuction(WatchAuctionRequest) returns (stream WatchAuctionResponse);
+  // Contact details of the other party of a closed auction, so they can agree
+  // on payment and delivery: the winner gets the producer's, the producer gets
+  // the winner's. Nobody else can ask, and nothing is revealed before the close,
+  // so bidders cannot arrange a deal outside the auction.
+  rpc GetAuctionContact(GetAuctionContactRequest) returns (GetAuctionContactResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
 }
 
 enum AuctionStatus {
@@ -179,3 +186,23 @@ message AuctionClosed {
   Auction auction = 1;
 }
 
+
+message GetAuctionContactRequest {
+  string auction_id = 1;
+}
+
+// The other party of a closed auction, as seen by the caller.
+message AuctionContact {
+  // PRODUCER when the caller won; BUYER when the caller is the producer.
+  UserRole role = 1;
+  string full_name = 2;
+  string email = 3;
+  optional string phone = 4;
+  optional string municipality = 5;
+}
+
+message GetAuctionContactResponse {
+  AuctionContact contact = 1;
+  // Winning bid: the price both parties agreed to.
+  Money final_price = 2;
+}
