@@ -31,7 +31,9 @@ The same service speaks two protocols from a single `.proto` contract:
   increment above the runner-up's, the earliest wins ties, nobody bids above their maximum.
 - **Price suggestion** (`SuggestPrice`), explained with plain factors and **recent comparable
   sales** of the same category.
-- **Market prices** (`GetMarketPrices`, public): typical price per kilo by category and week.
+- **Market prices** (`GetMarketPrices`, public): typical price per kilo by category and week,
+  also **live** (`WatchMarketPrices`): a new message every time an auction closes.
+- **Lot origin:** every product carries its producer's municipality ("Desde Túquerres").
 - **Risk score** for every bid (last-second bids, new accounts, shared phone with the producer),
   shown only to the producer.
 
