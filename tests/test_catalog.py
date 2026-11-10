@@ -150,7 +150,7 @@ async def test_owner_gets_an_explained_price_suggestion(api: httpx.AsyncClient) 
     high = int(suggestion["rangeMax"]["units"])
     assert 0 < low <= suggested <= high
     assert suggestion["quantityKg"] == 1000
-    assert suggestion["modelVersion"].startswith("price-v1-")
+    assert suggestion["modelVersion"].startswith("price-v2-")
     codes = {factor["code"] for factor in suggestion["factors"]}
     assert "PRICE_FACTOR_CODE_LARGE_VOLUME" in codes
 

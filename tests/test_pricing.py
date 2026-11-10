@@ -7,7 +7,7 @@ from datetime import date
 import pytest
 
 from subastacampo.db.models import ProductCategory, QuantityUnit
-from subastacampo.pricing.features import PriceFeatures, build_features
+from subastacampo.pricing.features import PriceFeatures, build_features, to_frame
 from subastacampo.pricing.model import MODEL_CARD_PATH, PricingModel
 
 BASE = PriceFeatures(
@@ -71,3 +71,21 @@ def test_model_beats_the_no_ai_baseline() -> None:
     card = json.loads(MODEL_CARD_PATH.read_text(encoding="utf-8"))
 
     assert card["metrics"]["improvement_over_baseline"] > 0.3
+
+
+def test_the_calibrated_range_keeps_its_promise_on_unseen_data() -> None:
+    metrics = json.loads(MODEL_CARD_PATH.read_text(encoding="utf-8"))["metrics"]
+    before = metrics["interval_before_calibration"]["coverage"]
+    after = metrics["interval_after_calibration"]["coverage"]
+
+    assert before < metrics["target_coverage"]
+    assert after == pytest.approx(metrics["target_coverage"], abs=0.03)
+    assert all(value >= 0.75 for value in metrics["coverage_by_category"].values())
+
+
+def test_calibration_only_ever_widens_the_range(model: PricingModel) -> None:
+    prediction = model.predict(BASE)
+    raw = sorted(float(m.predict(to_frame([BASE]))[0]) for m in model._models.values())
+
+    assert prediction.low <= raw[0]
+    assert prediction.high >= raw[2]

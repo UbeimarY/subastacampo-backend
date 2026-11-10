@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 ARTIFACTS_DIR = Path(__file__).parent / "artifacts"
 MODEL_PATH = ARTIFACTS_DIR / "price_model.joblib"
 MODEL_CARD_PATH = ARTIFACTS_DIR / "model_card.json"
-MODEL_FORMAT_VERSION = 1
+MODEL_FORMAT_VERSION = 2
 QUANTILE_MODELS = ("low", "median", "high")
 
 
@@ -48,6 +48,9 @@ class PricingModel:
             )
         self.version: str = artifact["model_version"]
         self._models = artifact["models"]
+        # Widening measured on held-out data so the range keeps its coverage.
+        self._margin: float = float(artifact["conformal_margin"])
+        self.coverage: float = float(artifact["coverage"])
 
     @classmethod
     def load(cls, path: Path = MODEL_PATH) -> "PricingModel":
@@ -64,4 +67,8 @@ class PricingModel:
         low, median, high = sorted(
             float(self._models[name].predict(frame)[0]) for name in QUANTILE_MODELS
         )
-        return PricePerKg(low=low, median=median, high=high)
+        return PricePerKg(
+            low=max(0.0, low - self._margin * median),
+            median=median,
+            high=high + self._margin * median,
+        )
