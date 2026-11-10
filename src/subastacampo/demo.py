@@ -10,7 +10,7 @@ account uses DEMO_PASSWORD. Runs once: it stops if the demo accounts exist.
 
 import asyncio
 import os
-import random
+import secrets
 import sys
 import uuid
 from dataclasses import dataclass
@@ -36,7 +36,6 @@ from subastacampo.db.models import (
 from subastacampo.pricing.features import KG_PER_UNIT
 
 DOMAIN = "demo.subastacampo.co"
-SEED = 7
 
 
 @dataclass(frozen=True)
@@ -176,7 +175,9 @@ BUYERS = [
 
 
 async def seed(session: AsyncSession, password: str, now: datetime) -> dict[str, int]:
-    rng = random.Random(SEED)
+    # The operating system's generator: no predictable sequence anywhere in the code,
+    # even for demo data (every run produces a different but believable market).
+    rng = secrets.SystemRandom()
     password_hash = await hash_password(password)
     joined = now - timedelta(days=90)
 
