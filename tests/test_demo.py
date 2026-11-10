@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from subastacampo.config import Settings
 from subastacampo.db.models import Auction, AuctionStatus, AutoBid, Bid
-from subastacampo.demo import seed
+from subastacampo.demo import Dice, seed
 
 pytestmark = pytest.mark.anyio
 
@@ -36,3 +36,14 @@ async def test_the_demo_fills_history_and_live_auctions_that_follow_the_rules(
                 auction.status == AuctionStatus.CLOSED and highest is not None
             )
     await engine.dispose()
+
+
+def test_the_dice_stay_within_their_bounds() -> None:
+    dice = Dice()
+    rolls = [dice.randint(2, 4) for _ in range(200)]
+    spread = [dice.uniform(0.8, 1.05) for _ in range(200)]
+
+    assert set(rolls) == {2, 3, 4}
+    assert all(0.8 <= value <= 1.05 for value in spread)
+    assert sorted(dice.sample(range(10), k=10)) == list(range(10))
+    assert len(set(dice.sample("abcdef", k=4))) == 4

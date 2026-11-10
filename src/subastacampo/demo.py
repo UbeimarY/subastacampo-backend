@@ -13,9 +13,11 @@ import os
 import secrets
 import sys
 import uuid
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from typing import TypeVar
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -36,6 +38,35 @@ from subastacampo.db.models import (
 from subastacampo.pricing.features import KG_PER_UNIT
 
 DOMAIN = "demo.subastacampo.co"
+T = TypeVar("T")
+
+
+class Dice:
+    """Randomness for the demo, drawn from the `secrets` module only.
+
+    Demo data does not need security, but a codebase with no predictable
+    generator anywhere is simpler to audit than one with justified exceptions.
+    Every run produces a different, believable market.
+    """
+
+    def random(self) -> float:
+        return secrets.randbelow(1_000_000) / 1_000_000
+
+    def randint(self, low: int, high: int) -> int:
+        return low + secrets.randbelow(high - low + 1)
+
+    def uniform(self, low: float, high: float) -> float:
+        return low + (high - low) * self.random()
+
+    def choice(self, options: Sequence[T]) -> T:
+        return secrets.choice(options)
+
+    def sample(self, options: Sequence[T], k: int) -> list[T]:
+        pool = list(options)
+        for i in range(len(pool) - 1, 0, -1):  # Fisher-Yates
+            j = secrets.randbelow(i + 1)
+            pool[i], pool[j] = pool[j], pool[i]
+        return pool[:k]
 
 
 @dataclass(frozen=True)
@@ -175,9 +206,7 @@ BUYERS = [
 
 
 async def seed(session: AsyncSession, password: str, now: datetime) -> dict[str, int]:
-    # The operating system's generator: no predictable sequence anywhere in the code,
-    # even for demo data (every run produces a different but believable market).
-    rng = secrets.SystemRandom()
+    rng = Dice()
     password_hash = await hash_password(password)
     joined = now - timedelta(days=90)
 
