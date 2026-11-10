@@ -98,6 +98,7 @@ def to_product_message(product: Product, *, today: date) -> ProductMessage:
         shelf_life_days=product.shelf_life_days,
         remaining_shelf_life_days=remaining_shelf_life_days(product, today=today),
         created_at=to_timestamp(product.created_at),
+        origin=product.origin,
     )
 
 

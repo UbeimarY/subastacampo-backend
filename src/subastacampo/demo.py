@@ -211,6 +211,7 @@ async def seed(session: AsyncSession, password: str, now: datetime) -> dict[str,
             unit=lot.unit,
             harvest_date=(created - timedelta(days=rng.randint(0, 2))).date(),
             shelf_life_days=lot.shelf_life_days,
+            origin=producer.municipality,
             created_at=created,
         )
         session.add(product)

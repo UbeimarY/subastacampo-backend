@@ -113,6 +113,8 @@ class Product(Base):
     unit: Mapped[QuantityUnit] = mapped_column(_enum_column(QuantityUnit, "quantity_unit"))
     harvest_date: Mapped[date]
     shelf_life_days: Mapped[int] = mapped_column(Integer)
+    # Municipality the harvest comes from: the producer's when the lot was published.
+    origin: Mapped[str | None] = mapped_column(String(100))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     producer: Mapped[User] = relationship(back_populates="products", lazy="raise")

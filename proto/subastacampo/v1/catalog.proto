@@ -44,6 +44,8 @@ message Product {
   // Computed by the server from the harvest date and the shelf life.
   int32 remaining_shelf_life_days = 10;
   google.protobuf.Timestamp created_at = 11;
+  // Municipality the harvest comes from ("Túquerres"), when the producer gave one.
+  optional string origin = 12;
 }
 
 // Why the model suggested a given price. Clients render the text.

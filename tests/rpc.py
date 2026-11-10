@@ -33,7 +33,12 @@ def error_detail(response: httpx.Response) -> ErrorDetail:
 
 
 async def sign_up(
-    client: httpx.AsyncClient, *, role: str, email: str, phone: str | None = None
+    client: httpx.AsyncClient,
+    *,
+    role: str,
+    email: str,
+    phone: str | None = None,
+    municipality: str | None = None,
 ) -> str:
     """Registers a user and returns an access token."""
     password = "very-secure-1"
@@ -45,6 +50,8 @@ async def sign_up(
     }
     if phone:
         body["phone"] = phone
+    if municipality:
+        body["municipality"] = municipality
     await call(client, "AuthService", "Register", body)
     response = await call(client, "AuthService", "Login", {"email": email, "password": password})
     return str(response.json()["accessToken"])

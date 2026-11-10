@@ -18,7 +18,14 @@ from subastacampo.auctions.broker import AuctionEventBroker, SubscriptionOverflo
 from subastacampo.auth.principal import require_principal
 from subastacampo.calendar import BusinessCalendar
 from subastacampo.clock import Clock
-from subastacampo.db.models import Auction, AuctionStatus, Product, ProductCategory, UserRole
+from subastacampo.db.models import (
+    Auction,
+    AuctionStatus,
+    Product,
+    ProductCategory,
+    User,
+    UserRole,
+)
 from subastacampo.errors import rpc_error, validation_error
 from subastacampo.mappers import (
     CATEGORY_FROM_PROTO,
@@ -88,6 +95,8 @@ class CatalogServiceImpl(CatalogService):
         product = Product(producer_id=principal.user_id, **_validated_fields(request, today))
 
         async with self._session_factory() as session:
+            producer = await session.get(User, principal.user_id)
+            product.origin = producer.municipality if producer else None
             session.add(product)
             await session.commit()
             await session.refresh(product)

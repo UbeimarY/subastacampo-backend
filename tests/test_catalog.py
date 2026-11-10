@@ -191,3 +191,17 @@ async def test_the_suggestion_cites_closed_sales_of_the_same_category(
     assert comparable["productName"] == "Papa pastusa"
     assert comparable["quantityKg"] == 1000
     assert comparable["pricePerKg"]["units"] == "500"
+
+
+async def test_a_lot_comes_from_its_producers_municipality(api: httpx.AsyncClient) -> None:
+    token = await sign_up(api, role=PRODUCER, email="tuquerres@test.com", municipality="Túquerres")
+
+    product = (await create_product(api, token)).json()["product"]
+
+    assert product["origin"] == "Túquerres"
+
+
+async def test_a_lot_without_municipality_has_no_origin(api: httpx.AsyncClient) -> None:
+    token = await sign_up(api, role=PRODUCER, email="sinmunicipio@test.com")
+
+    assert "origin" not in (await create_product(api, token)).json()["product"]
