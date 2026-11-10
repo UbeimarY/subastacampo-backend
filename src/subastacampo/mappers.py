@@ -1,5 +1,6 @@
 """Conversions between database models and contract messages."""
 
+from collections.abc import Sequence
 from datetime import date, datetime, timedelta
 
 from google.protobuf.timestamp_pb2 import Timestamp
@@ -16,6 +17,7 @@ from subastacampo.db.models import (
     UserRole,
 )
 from subastacampo.errors import validation_error
+from subastacampo.pricing.comparables import Sale
 from subastacampo.pricing.explanation import Factor, FactorCode
 from subastacampo.pricing.features import PriceFeatures
 from subastacampo.pricing.model import PricePerKg
@@ -24,7 +26,7 @@ from subastacampo.v1.auction_pb2 import Auction as AuctionMessage
 from subastacampo.v1.auction_pb2 import Bid as BidMessage
 from subastacampo.v1.auction_pb2 import RiskAssessment
 from subastacampo.v1.auth_pb2 import User as UserMessage
-from subastacampo.v1.catalog_pb2 import PriceFactor, PriceSuggestion
+from subastacampo.v1.catalog_pb2 import ComparableSale, PriceFactor, PriceSuggestion
 from subastacampo.v1.catalog_pb2 import Product as ProductMessage
 from subastacampo.v1.common_pb2 import Money
 
@@ -119,6 +121,8 @@ def to_price_suggestion(
     factors: list[Factor],
     *,
     model_version: str,
+    coverage: float,
+    comparables: Sequence[Sale] = (),
 ) -> PriceSuggestion:
     kg = features.quantity_kg
     return PriceSuggestion(
@@ -130,6 +134,16 @@ def to_price_suggestion(
         category_demand=features.category_demand,
         factors=[PriceFactor(code=_FACTOR_TO_PROTO[f.code], value=f.value) for f in factors],
         model_version=model_version,
+        range_coverage=coverage,
+        comparables=[
+            ComparableSale(
+                product_name=sale.product_name,
+                quantity_kg=sale.quantity_kg,
+                price_per_kg=money(round_to(sale.price_per_kg, 10)),
+                closed_at=to_timestamp(sale.closed_at),
+            )
+            for sale in comparables
+        ],
     )
 
 

@@ -1,12 +1,14 @@
 from datetime import timedelta
 from typing import Any
 
+import anyio
 import httpx
 import pytest
 
 from subastacampo.v1 import common_pb2
-from tests.conftest import TODAY
+from tests.conftest import TODAY, FakeClock
 from tests.rpc import call, error_detail, sign_up
+from tests.test_auction_contact import closed_auction
 
 pytestmark = pytest.mark.anyio
 
@@ -151,6 +153,8 @@ async def test_owner_gets_an_explained_price_suggestion(api: httpx.AsyncClient) 
     assert 0 < low <= suggested <= high
     assert suggestion["quantityKg"] == 1000
     assert suggestion["modelVersion"].startswith("price-v2-")
+    assert suggestion["rangeCoverage"] == pytest.approx(0.8)
+    assert "comparables" not in suggestion  # no closed auctions yet
     codes = {factor["code"] for factor in suggestion["factors"]}
     assert "PRICE_FACTOR_CODE_LARGE_VOLUME" in codes
 
@@ -166,3 +170,24 @@ async def test_only_the_owner_gets_a_price_suggestion(api: httpx.AsyncClient) ->
 
     assert response.status_code == 403
     assert error_detail(response).reason == common_pb2.ERROR_REASON_NOT_PRODUCT_OWNER
+
+
+async def test_the_suggestion_cites_closed_sales_of_the_same_category(
+    api: httpx.AsyncClient, producer: str, buyer: str, clock: FakeClock
+) -> None:
+    sold = await closed_auction(api, producer, buyer, clock)  # 1000 kg for $500.000
+    for _ in range(100):  # the background closer runs every 50 ms
+        status = (await call(api, "AuctionService", "GetAuction", {"auctionId": sold})).json()
+        if status["auction"]["status"] == "AUCTION_STATUS_CLOSED":
+            break
+        await anyio.sleep(0.05)
+    product_id = (await create_product(api, producer, name="Papa nueva")).json()["product"]["id"]
+
+    response = await call(
+        api, "CatalogService", "SuggestPrice", {"productId": product_id}, token=producer
+    )
+
+    [comparable] = response.json()["suggestion"]["comparables"]
+    assert comparable["productName"] == "Papa pastusa"
+    assert comparable["quantityKg"] == 1000
+    assert comparable["pricePerKg"]["units"] == "500"

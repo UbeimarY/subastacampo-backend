@@ -3,7 +3,7 @@
 import asyncio
 import math
 import uuid
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from subastacampo.auth.principal import require_principal
 from subastacampo.calendar import BusinessCalendar
-from subastacampo.db.models import Auction, Product, ProductCategory, UserRole
+from subastacampo.db.models import Auction, AuctionStatus, Product, ProductCategory, UserRole
 from subastacampo.errors import rpc_error, validation_error
 from subastacampo.mappers import (
     CATEGORY_FROM_PROTO,
@@ -24,8 +24,9 @@ from subastacampo.mappers import (
     to_product_message,
 )
 from subastacampo.pagination import Cursor, decode_cursor, encode_cursor, resolve_page_size
+from subastacampo.pricing.comparables import Sale, closest_sales
 from subastacampo.pricing.explanation import explain
-from subastacampo.pricing.features import DEFAULT_CATEGORY_DEMAND, build_features
+from subastacampo.pricing.features import DEFAULT_CATEGORY_DEMAND, KG_PER_UNIT, build_features
 from subastacampo.pricing.model import PricingModel
 from subastacampo.v1 import common_pb2
 from subastacampo.v1.catalog_connect import CatalogService
@@ -43,6 +44,8 @@ from subastacampo.v1.catalog_pb2 import (
 MAX_QUANTITY = Decimal("1000000")
 _CENT = Decimal("0.01")
 DEMAND_WINDOW = timedelta(days=30)
+# How far back closed auctions count as comparable sales.
+COMPARABLES_WINDOW = timedelta(days=90)
 
 
 class CatalogServiceImpl(CatalogService):
@@ -143,6 +146,12 @@ class CatalogServiceImpl(CatalogService):
                     "Only the product's producer can request a price suggestion",
                 )
             demand = await _category_demand(session, product.category)
+            sales = await _recent_sales(
+                session,
+                product.category,
+                exclude=product.id,
+                since=datetime.combine(self._calendar.today(), time.min, UTC) - COMPARABLES_WINDOW,
+            )
 
         features = build_features(
             category=product.category,
@@ -163,6 +172,8 @@ class CatalogServiceImpl(CatalogService):
             prediction,
             explain(features, has_demand_data=demand is not None),
             model_version=self._pricing.version,
+            coverage=self._pricing.coverage,
+            comparables=closest_sales(sales, features.quantity_kg),
         )
         return SuggestPriceResponse(suggestion=suggestion)
 
@@ -176,6 +187,34 @@ async def _category_demand(session: AsyncSession, category: ProductCategory) -> 
         .where(Product.category == category, Auction.starts_at >= since)
     )
     return float(average) if average is not None else None
+
+
+async def _recent_sales(
+    session: AsyncSession, category: ProductCategory, *, exclude: uuid.UUID, since: datetime
+) -> list[Sale]:
+    """Closed auctions of the category that sold, since the given moment."""
+    rows = await session.execute(
+        select(Product.name, Product.quantity, Product.unit, Auction.current_price, Auction.ends_at)
+        .join(Product, Auction.product_id == Product.id)
+        .where(
+            Product.category == category,
+            Product.id != exclude,
+            Auction.status == AuctionStatus.CLOSED,
+            Auction.winner_id.is_not(None),
+            Auction.ends_at >= since,
+        )
+        .order_by(Auction.ends_at.desc())
+        .limit(200)
+    )
+    return [
+        Sale(
+            product_name=name,
+            quantity_kg=float(quantity) * KG_PER_UNIT[unit],
+            final_price=price,
+            closed_at=ends_at,
+        )
+        for name, quantity, unit, price, ends_at in rows
+    ]
 
 
 def _validated_fields(request: CreateProductRequest, today: date) -> dict[str, Any]:

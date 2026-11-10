@@ -65,6 +65,20 @@ message PriceSuggestion {
   double category_demand = 6;
   repeated PriceFactor factors = 7;
   string model_version = 8;
+  // Share of closing prices the range is expected to hold: 0.8 means 8 in 10.
+  // Calibrated on auctions the model never saw, so the promise is measured.
+  double range_coverage = 9;
+  // Recent closed auctions of the same category, the closest in volume first.
+  // Empty until the platform has closed auctions in the category.
+  repeated ComparableSale comparables = 10;
+}
+
+// A closed auction shown as evidence next to the suggestion.
+message ComparableSale {
+  string product_name = 1;
+  double quantity_kg = 2;
+  Money price_per_kg = 3;
+  google.protobuf.Timestamp closed_at = 4;
 }
 
 message CreateProductRequest {
