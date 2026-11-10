@@ -2,11 +2,12 @@
 
 import uuid
 from collections.abc import AsyncIterator, Callable
+from datetime import datetime
 
 from connectrpc.code import Code
 from connectrpc.errors import ConnectError
 from connectrpc.request import RequestContext
-from sqlalchemy import func, select, tuple_
+from sqlalchemy import delete, func, select, tuple_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import selectinload
@@ -19,6 +20,7 @@ from subastacampo.auctions.events import (
     redact_for,
     snapshot_event,
 )
+from subastacampo.auctions.proxy import AuctionPrice, AutoBidLimit, resolve
 from subastacampo.auctions.rules import (
     MAX_DURATION,
     MIN_DURATION,
@@ -29,7 +31,7 @@ from subastacampo.auctions.rules import (
 from subastacampo.auth.principal import optional_principal, require_principal
 from subastacampo.calendar import BusinessCalendar
 from subastacampo.clock import Clock
-from subastacampo.db.models import Auction, AuctionStatus, Bid, Product, User, UserRole
+from subastacampo.db.models import Auction, AuctionStatus, AutoBid, Bid, Product, User, UserRole
 from subastacampo.errors import rpc_error, validation_error
 from subastacampo.mappers import (
     ROLE_TO_PROTO,
@@ -38,6 +40,7 @@ from subastacampo.mappers import (
     money_units,
     remaining_shelf_life_days,
     to_auction_message,
+    to_auto_bid_message,
     to_bid_message,
 )
 from subastacampo.pagination import Cursor, decode_cursor, encode_cursor, resolve_page_size
@@ -47,16 +50,22 @@ from subastacampo.v1 import auction_pb2, common_pb2
 from subastacampo.v1.auction_connect import AuctionService
 from subastacampo.v1.auction_pb2 import (
     AuctionContact,
+    CancelAutoBidRequest,
+    CancelAutoBidResponse,
     CreateAuctionRequest,
     CreateAuctionResponse,
     GetAuctionContactRequest,
     GetAuctionContactResponse,
     GetAuctionRequest,
     GetAuctionResponse,
+    GetAutoBidRequest,
+    GetAutoBidResponse,
     ListAuctionsRequest,
     ListAuctionsResponse,
     PlaceBidRequest,
     PlaceBidResponse,
+    SetAutoBidRequest,
+    SetAutoBidResponse,
     WatchAuctionRequest,
     WatchAuctionResponse,
 )
@@ -237,38 +246,11 @@ class AuctionServiceImpl(AuctionService):
                     minimum_bid=money(minimum),
                 )
 
-            close_time = apply_anti_sniping(now=now, ends_at=auction.ends_at)
-
-            # Scored before inserting the bid, so the facts describe the past only.
-            bidder = await session.get(User, principal.user_id)
-            assert bidder is not None
-            risk = score_bid(
-                await gather_facts(
-                    session,
-                    auction=auction,
-                    bidder=bidder,
-                    now=now,
-                    extends_close=close_time.extended,
-                )
+            bid = await _record_bid(
+                session, auction, principal.user_id, amount, now, request_id=request_id
             )
-
-            bid = Bid(
-                auction_id=auction.id,
-                bidder_id=principal.user_id,
-                bidder_number=await _bidder_number(session, auction.id, principal.user_id),
-                amount=amount,
-                placed_at=now,
-                extended_close=close_time.extended,
-                request_id=request_id,
-                risk_score=risk.score,
-                risk_signals=[signal.value for signal in risk.signals],
-            )
-            session.add(bid)
-            auction.current_price = amount
-            auction.bid_count += 1
-            if close_time.extended:
-                auction.ends_at = close_time.ends_at
-                auction.extension_count += 1
+            # Rivals' automatic bids answer at once, in the same transaction.
+            placed = [bid, *await _run_auto_bids(session, auction, now)]
 
             try:
                 await session.commit()
@@ -282,11 +264,117 @@ class AuctionServiceImpl(AuctionService):
 
         today = self._calendar.today()
         # Published only after the commit: nobody hears about a bid that was not saved.
-        self._broker.publish(auction.id, bid_placed_event(bid, auction, today=today))
+        self._publish_bids(auction, placed)
         return PlaceBidResponse(
             bid=to_bid_message(bid, include_risk=False),
             auction=to_auction_message(auction, today=today),
         )
+
+    async def set_auto_bid(
+        self,
+        request: SetAutoBidRequest,
+        ctx: RequestContext[SetAutoBidRequest, SetAutoBidResponse],
+    ) -> SetAutoBidResponse:
+        principal = require_principal(role=UserRole.BUYER)
+        auction_id = _parse_id(request.auction_id, _auction_not_found)
+        maximum = _positive_amount(request.max_amount, "max_amount")
+        now = self._clock.now()
+
+        async with self._session_factory() as session:
+            auction = await load_auction(session, auction_id, for_update=True)
+            if auction is None:
+                raise _auction_not_found()
+            if await close_if_due(session, auction, now):
+                await session.commit()
+                self._broker.publish(
+                    auction.id, auction_closed_event(auction, today=self._calendar.today())
+                )
+                raise _auction_not_active()
+            if auction.status != AuctionStatus.ACTIVE:
+                raise _auction_not_active()
+
+            leading = await _leader(session, auction.id) == principal.user_id
+            # The leader may keep a maximum at the current price; anyone else must
+            # be able to beat it.
+            floor = auction.current_price if leading else _minimum(auction)
+            if maximum < floor:
+                raise rpc_error(
+                    Code.FAILED_PRECONDITION,
+                    common_pb2.ERROR_REASON_BID_TOO_LOW,
+                    "The maximum cannot beat the current price",
+                    minimum_bid=money(floor),
+                )
+
+            limit = await session.scalar(
+                select(AutoBid).where(
+                    AutoBid.auction_id == auction.id, AutoBid.bidder_id == principal.user_id
+                )
+            )
+            if limit is None:
+                limit = AutoBid(
+                    auction_id=auction.id,
+                    bidder_id=principal.user_id,
+                    created_at=now,
+                )
+                session.add(limit)
+            limit.max_amount = maximum
+            limit.updated_at = now
+            await session.flush()
+
+            placed = await _run_auto_bids(session, auction, now)
+            leader = await _leader(session, auction.id)
+            await session.commit()
+
+        self._publish_bids(auction, placed)
+        return SetAutoBidResponse(
+            auto_bid=to_auto_bid_message(limit, auction, leader_id=leader),
+            auction=to_auction_message(auction, today=self._calendar.today()),
+        )
+
+    async def cancel_auto_bid(
+        self,
+        request: CancelAutoBidRequest,
+        ctx: RequestContext[CancelAutoBidRequest, CancelAutoBidResponse],
+    ) -> CancelAutoBidResponse:
+        principal = require_principal(role=UserRole.BUYER)
+        auction_id = _parse_id(request.auction_id, _auction_not_found)
+        async with self._session_factory() as session:
+            # Same lock as bidding: a cancel never lands in the middle of an exchange.
+            if await load_auction(session, auction_id, for_update=True) is None:
+                raise _auction_not_found()
+            await session.execute(
+                delete(AutoBid).where(
+                    AutoBid.auction_id == auction_id, AutoBid.bidder_id == principal.user_id
+                )
+            )
+            await session.commit()
+        return CancelAutoBidResponse()
+
+    async def get_auto_bid(
+        self,
+        request: GetAutoBidRequest,
+        ctx: RequestContext[GetAutoBidRequest, GetAutoBidResponse],
+    ) -> GetAutoBidResponse:
+        principal = require_principal(role=UserRole.BUYER)
+        auction_id = _parse_id(request.auction_id, _auction_not_found)
+        async with self._session_factory() as session:
+            auction = await load_auction(session, auction_id)
+            if auction is None:
+                raise _auction_not_found()
+            limit = await session.scalar(
+                select(AutoBid).where(
+                    AutoBid.auction_id == auction_id, AutoBid.bidder_id == principal.user_id
+                )
+            )
+            if limit is None:
+                return GetAutoBidResponse()
+            leader = await _leader(session, auction_id)
+        return GetAutoBidResponse(auto_bid=to_auto_bid_message(limit, auction, leader_id=leader))
+
+    def _publish_bids(self, auction: Auction, bids: list[Bid]) -> None:
+        today = self._calendar.today()
+        for bid in bids:
+            self._broker.publish(auction.id, bid_placed_event(bid, auction, today=today))
 
     async def watch_auction(
         self,
@@ -404,6 +492,103 @@ class AuctionServiceImpl(AuctionService):
             bid=to_bid_message(bid, include_risk=False),
             auction=to_auction_message(auction, today=self._calendar.today()),
         )
+
+
+def _minimum(auction: Auction) -> int:
+    return minimum_next_bid(
+        starting_price=auction.starting_price,
+        current_price=auction.current_price,
+        min_increment=auction.min_increment,
+        bid_count=auction.bid_count,
+    )
+
+
+async def _leader(session: AsyncSession, auction_id: uuid.UUID) -> uuid.UUID | None:
+    """Whoever placed the highest bid. Bids only ever rise, so it is the latest."""
+    return await session.scalar(
+        select(Bid.bidder_id)
+        .where(Bid.auction_id == auction_id)
+        .order_by(Bid.amount.desc(), Bid.placed_at)
+        .limit(1)
+    )
+
+
+async def _record_bid(
+    session: AsyncSession,
+    auction: Auction,
+    bidder_id: uuid.UUID,
+    amount: int,
+    now: datetime,
+    *,
+    request_id: uuid.UUID,
+    automatic: bool = False,
+) -> Bid:
+    """Adds a valid bid: risk score, anti-sniping and the auction's new price."""
+    close_time = apply_anti_sniping(now=now, ends_at=auction.ends_at)
+
+    # Scored before inserting the bid, so the facts describe the past only.
+    bidder = await session.get(User, bidder_id)
+    assert bidder is not None
+    risk = score_bid(
+        await gather_facts(
+            session, auction=auction, bidder=bidder, now=now, extends_close=close_time.extended
+        )
+    )
+
+    bid = Bid(
+        auction_id=auction.id,
+        bidder_id=bidder_id,
+        bidder_number=await _bidder_number(session, auction.id, bidder_id),
+        amount=amount,
+        placed_at=now,
+        extended_close=close_time.extended,
+        request_id=request_id,
+        risk_score=risk.score,
+        risk_signals=[signal.value for signal in risk.signals],
+        automatic=automatic,
+    )
+    session.add(bid)
+    auction.current_price = amount
+    auction.bid_count += 1
+    if close_time.extended:
+        auction.ends_at = close_time.ends_at
+        auction.extension_count += 1
+    # Visible to the next bid's queries within this transaction.
+    await session.flush()
+    return bid
+
+
+async def _run_auto_bids(session: AsyncSession, auction: Auction, now: datetime) -> list[Bid]:
+    """Places the automatic bids the auction's current state calls for.
+
+    The caller holds the auction's row lock, so the exchange is decided at once
+    and nobody sees half of it.
+    """
+    limits = (await session.scalars(select(AutoBid).where(AutoBid.auction_id == auction.id))).all()
+    if not limits:
+        return []
+    plan = resolve(
+        AuctionPrice(
+            starting_price=auction.starting_price,
+            min_increment=auction.min_increment,
+            current_price=auction.current_price,
+            bid_count=auction.bid_count,
+            leader_id=await _leader(session, auction.id),
+        ),
+        [AutoBidLimit(limit.bidder_id, limit.max_amount, limit.created_at) for limit in limits],
+    )
+    return [
+        await _record_bid(
+            session,
+            auction,
+            step.bidder_id,
+            step.amount,
+            now,
+            request_id=uuid.uuid4(),
+            automatic=True,
+        )
+        for step in plan
+    ]
 
 
 async def _bidder_number(session: AsyncSession, auction_id: uuid.UUID, bidder_id: uuid.UUID) -> int:

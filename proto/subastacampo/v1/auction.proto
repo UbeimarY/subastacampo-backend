@@ -27,6 +27,17 @@ service AuctionService {
   // on payment and delivery: the winner gets the producer's, the producer gets
   // the winner's. Nobody else can ask, and nothing is revealed before the close,
   // so bidders cannot arrange a deal outside the auction.
+  // Sets (or replaces) the most the buyer will pay. The server then bids for
+  // them only what it takes to lead, up to that maximum, as rivals bid.
+  // The maximum is private: other participants only see the resulting bids.
+  // Buyers only. Fails with BID_TOO_LOW if the maximum cannot beat the price.
+  rpc SetAutoBid(SetAutoBidRequest) returns (SetAutoBidResponse);
+  // Stops bidding automatically. Bids already placed stay.
+  rpc CancelAutoBid(CancelAutoBidRequest) returns (CancelAutoBidResponse);
+  // The caller's own automatic bid on an auction, if any.
+  rpc GetAutoBid(GetAutoBidRequest) returns (GetAutoBidResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
   rpc GetAuctionContact(GetAuctionContactRequest) returns (GetAuctionContactResponse) {
     option idempotency_level = NO_SIDE_EFFECTS;
   }
@@ -107,6 +118,8 @@ message Bid {
   bool extended_close = 7;
   // Only filled for the producer who owns the auction; empty for everyone else.
   RiskAssessment risk = 8;
+  // Placed by the server for the bidder, within their automatic-bid maximum.
+  bool automatic = 9;
 }
 
 message CreateAuctionRequest {
@@ -205,4 +218,38 @@ message GetAuctionContactResponse {
   AuctionContact contact = 1;
   // Winning bid: the price both parties agreed to.
   Money final_price = 2;
+}
+
+message AutoBid {
+  string auction_id = 1;
+  Money max_amount = 2;
+  // True when rivals already went above the maximum: it will not bid again.
+  bool exhausted = 3;
+  google.protobuf.Timestamp updated_at = 4;
+}
+
+message SetAutoBidRequest {
+  string auction_id = 1;
+  Money max_amount = 2;
+}
+
+message SetAutoBidResponse {
+  AutoBid auto_bid = 1;
+  // The auction after any bids the new maximum triggered.
+  Auction auction = 2;
+}
+
+message CancelAutoBidRequest {
+  string auction_id = 1;
+}
+
+message CancelAutoBidResponse {}
+
+message GetAutoBidRequest {
+  string auction_id = 1;
+}
+
+message GetAutoBidResponse {
+  // Unset when the caller has no automatic bid on this auction.
+  AutoBid auto_bid = 1;
 }

@@ -184,5 +184,26 @@ class Bid(Base):
     risk_signals: Mapped[list[str]] = mapped_column(
         ARRAY(String(40)), default=list, server_default=text("'{}'")
     )
+    # Placed by the system for the bidder, up to their automatic-bid maximum.
+    automatic: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
 
     auction: Mapped[Auction] = relationship(back_populates="bids", lazy="raise")
+
+
+class AutoBid(Base):
+    """A buyer's private maximum: the system bids for them up to it."""
+
+    __tablename__ = "auto_bids"
+    __table_args__ = (
+        CheckConstraint("max_amount > 0", name="max_amount_positive"),
+        # One maximum per buyer and auction; setting it again replaces it.
+        UniqueConstraint("auction_id", "bidder_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    auction_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("auctions.id"), index=True)
+    bidder_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"))
+    max_amount: Mapped[int] = mapped_column(BigInteger)
+    # Earlier wins ties between equal maxima. Raising the maximum keeps it.
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

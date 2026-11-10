@@ -7,7 +7,7 @@ from subastacampo.db.base import Base
 
 
 def test_all_tables_are_registered() -> None:
-    assert set(Base.metadata.tables) == {"users", "products", "auctions", "bids"}
+    assert set(Base.metadata.tables) == {"users", "products", "auctions", "bids", "auto_bids"}
 
 
 def test_database_allows_only_one_active_auction_per_product() -> None:

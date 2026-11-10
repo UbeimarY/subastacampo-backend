@@ -1,5 +1,6 @@
 """Conversions between database models and contract messages."""
 
+import uuid
 from collections.abc import Sequence
 from datetime import date, datetime, timedelta
 
@@ -9,6 +10,7 @@ from subastacampo.auctions.rules import minimum_next_bid
 from subastacampo.db.models import (
     Auction,
     AuctionStatus,
+    AutoBid,
     Bid,
     Product,
     ProductCategory,
@@ -212,6 +214,7 @@ def to_bid_message(bid: Bid, *, include_risk: bool) -> BidMessage:
         amount=money(bid.amount),
         placed_at=to_timestamp(bid.placed_at),
         extended_close=bid.extended_close,
+        automatic=bid.automatic,
     )
     if include_risk:
         message.risk.CopyFrom(
@@ -225,3 +228,21 @@ def to_bid_message(bid: Bid, *, include_risk: bool) -> BidMessage:
             )
         )
     return message
+
+
+def to_auto_bid_message(
+    limit: AutoBid, auction: Auction, *, leader_id: uuid.UUID | None
+) -> auction_pb2.AutoBid:
+    leading = leader_id == limit.bidder_id
+    next_minimum = minimum_next_bid(
+        starting_price=auction.starting_price,
+        current_price=auction.current_price,
+        min_increment=auction.min_increment,
+        bid_count=auction.bid_count,
+    )
+    return auction_pb2.AutoBid(
+        auction_id=str(limit.auction_id),
+        max_amount=money(limit.max_amount),
+        exhausted=not leading and limit.max_amount < next_minimum,
+        updated_at=to_timestamp(limit.updated_at),
+    )
