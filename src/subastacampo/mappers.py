@@ -22,6 +22,7 @@ from subastacampo.errors import validation_error
 from subastacampo.pricing.comparables import Sale
 from subastacampo.pricing.explanation import Factor, FactorCode
 from subastacampo.pricing.features import PriceFeatures
+from subastacampo.pricing.market import CategorySummary
 from subastacampo.pricing.model import PricePerKg
 from subastacampo.v1 import auction_pb2, catalog_pb2, common_pb2
 from subastacampo.v1.auction_pb2 import Auction as AuctionMessage
@@ -245,4 +246,22 @@ def to_auto_bid_message(
         max_amount=money(limit.max_amount),
         exhausted=not leading and limit.max_amount < next_minimum,
         updated_at=to_timestamp(limit.updated_at),
+    )
+
+
+def to_category_market(summary: CategorySummary) -> catalog_pb2.CategoryMarket:
+    return catalog_pb2.CategoryMarket(
+        category=_CATEGORY_TO_PROTO[summary.category],
+        sales=summary.sales,
+        median_price_per_kg=money(round_to(summary.median_price_per_kg, 10)),
+        lowest_price_per_kg=money(round_to(summary.lowest_price_per_kg, 10)),
+        highest_price_per_kg=money(round_to(summary.highest_price_per_kg, 10)),
+        weeks=[
+            catalog_pb2.WeeklyPrice(
+                week_start=week.start.isoformat(),
+                sales=week.sales,
+                median_price_per_kg=money(round_to(week.median_price_per_kg, 10)),
+            )
+            for week in summary.weeks
+        ],
     )

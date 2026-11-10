@@ -10,7 +10,7 @@ from typing import Any
 from connectrpc.code import Code
 from connectrpc.errors import ConnectError
 from connectrpc.request import RequestContext
-from sqlalchemy import func, select, tuple_
+from sqlalchemy import func, select, true, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from subastacampo.auth.principal import require_principal
@@ -20,6 +20,7 @@ from subastacampo.errors import rpc_error, validation_error
 from subastacampo.mappers import (
     CATEGORY_FROM_PROTO,
     UNIT_FROM_PROTO,
+    to_category_market,
     to_price_suggestion,
     to_product_message,
 )
@@ -27,12 +28,15 @@ from subastacampo.pagination import Cursor, decode_cursor, encode_cursor, resolv
 from subastacampo.pricing.comparables import Sale, closest_sales
 from subastacampo.pricing.explanation import explain
 from subastacampo.pricing.features import DEFAULT_CATEGORY_DEMAND, KG_PER_UNIT, build_features
+from subastacampo.pricing.market import period_days, summarize
 from subastacampo.pricing.model import PricingModel
 from subastacampo.v1 import common_pb2
 from subastacampo.v1.catalog_connect import CatalogService
 from subastacampo.v1.catalog_pb2 import (
     CreateProductRequest,
     CreateProductResponse,
+    GetMarketPricesRequest,
+    GetMarketPricesResponse,
     GetProductRequest,
     GetProductResponse,
     ListProductsRequest,
@@ -177,6 +181,23 @@ class CatalogServiceImpl(CatalogService):
         )
         return SuggestPriceResponse(suggestion=suggestion)
 
+    async def get_market_prices(
+        self,
+        request: GetMarketPricesRequest,
+        ctx: RequestContext[GetMarketPricesRequest, GetMarketPricesResponse],
+    ) -> GetMarketPricesResponse:
+        days = period_days(request.days)
+        since = datetime.combine(self._calendar.today(), time.min, UTC) - timedelta(days=days)
+        sales: dict[ProductCategory, list[Sale]] = {category: [] for category in ProductCategory}
+        async with self._session_factory() as session:
+            for category in ProductCategory:
+                sales[category] = await _recent_sales(
+                    session, category, exclude=None, since=since, limit=1000
+                )
+        return GetMarketPricesResponse(
+            categories=[to_category_market(summary) for summary in summarize(sales)], days=days
+        )
+
 
 async def _category_demand(session: AsyncSession, category: ProductCategory) -> float | None:
     """Average bids per auction in the category during the demand window."""
@@ -190,7 +211,12 @@ async def _category_demand(session: AsyncSession, category: ProductCategory) -> 
 
 
 async def _recent_sales(
-    session: AsyncSession, category: ProductCategory, *, exclude: uuid.UUID, since: datetime
+    session: AsyncSession,
+    category: ProductCategory,
+    *,
+    exclude: uuid.UUID | None,
+    since: datetime,
+    limit: int = 200,
 ) -> list[Sale]:
     """Closed auctions of the category that sold, since the given moment."""
     rows = await session.execute(
@@ -198,13 +224,13 @@ async def _recent_sales(
         .join(Product, Auction.product_id == Product.id)
         .where(
             Product.category == category,
-            Product.id != exclude,
+            Product.id != exclude if exclude is not None else true(),
             Auction.status == AuctionStatus.CLOSED,
             Auction.winner_id.is_not(None),
             Auction.ends_at >= since,
         )
         .order_by(Auction.ends_at.desc())
-        .limit(200)
+        .limit(limit)
     )
     return [
         Sale(

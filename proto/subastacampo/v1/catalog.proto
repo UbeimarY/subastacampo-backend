@@ -17,6 +17,11 @@ service CatalogService {
     option idempotency_level = NO_SIDE_EFFECTS;
   }
   // Suggests a price with the pricing model, explaining the main factors.
+  // Price per kilo the platform's closed auctions reached, by category and week.
+  // Public: producers check it before pricing, buyers before bidding.
+  rpc GetMarketPrices(GetMarketPricesRequest) returns (GetMarketPricesResponse) {
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
   rpc SuggestPrice(SuggestPriceRequest) returns (SuggestPriceResponse) {
     option idempotency_level = NO_SIDE_EFFECTS;
   }
@@ -127,4 +132,33 @@ message SuggestPriceRequest {
 
 message SuggestPriceResponse {
   PriceSuggestion suggestion = 1;
+}
+
+message GetMarketPricesRequest {
+  // Days back to cover, 7 to 180. Defaults to 60 when unset.
+  int32 days = 1;
+}
+
+message GetMarketPricesResponse {
+  // Only categories with at least one sale in the period, most sales first.
+  repeated CategoryMarket categories = 1;
+  int32 days = 2;
+}
+
+message CategoryMarket {
+  ProductCategory category = 1;
+  // Closed auctions that ended with a winner.
+  int32 sales = 2;
+  Money median_price_per_kg = 3;
+  Money lowest_price_per_kg = 4;
+  Money highest_price_per_kg = 5;
+  // Oldest week first.
+  repeated WeeklyPrice weeks = 6;
+}
+
+message WeeklyPrice {
+  // ISO 8601 date (YYYY-MM-DD) of the Monday that starts the week.
+  string week_start = 1;
+  int32 sales = 2;
+  Money median_price_per_kg = 3;
 }
