@@ -70,7 +70,7 @@ def create_app(
             AuthServiceImpl(session_factory, tokens)
         ),
         _service_name(catalog_pb2, "CatalogService"): CatalogServiceASGIApplication(
-            CatalogServiceImpl(session_factory, calendar, pricing)
+            CatalogServiceImpl(session_factory, calendar, pricing, broker, clock)
         ),
         _service_name(auction_pb2, "AuctionService"): AuctionServiceASGIApplication(
             AuctionServiceImpl(session_factory, calendar, clock, broker)

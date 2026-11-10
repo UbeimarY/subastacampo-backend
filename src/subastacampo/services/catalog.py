@@ -3,6 +3,7 @@
 import asyncio
 import math
 import uuid
+from collections.abc import AsyncIterator
 from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
 from typing import Any
@@ -13,8 +14,10 @@ from connectrpc.request import RequestContext
 from sqlalchemy import func, select, true, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from subastacampo.auctions.broker import AuctionEventBroker, SubscriptionOverflowError
 from subastacampo.auth.principal import require_principal
 from subastacampo.calendar import BusinessCalendar
+from subastacampo.clock import Clock
 from subastacampo.db.models import Auction, AuctionStatus, Product, ProductCategory, UserRole
 from subastacampo.errors import rpc_error, validation_error
 from subastacampo.mappers import (
@@ -23,6 +26,7 @@ from subastacampo.mappers import (
     to_category_market,
     to_price_suggestion,
     to_product_message,
+    to_timestamp,
 )
 from subastacampo.pagination import Cursor, decode_cursor, encode_cursor, resolve_page_size
 from subastacampo.pricing.comparables import Sale, closest_sales
@@ -33,6 +37,7 @@ from subastacampo.pricing.model import PricingModel
 from subastacampo.v1 import common_pb2
 from subastacampo.v1.catalog_connect import CatalogService
 from subastacampo.v1.catalog_pb2 import (
+    CategoryMarket,
     CreateProductRequest,
     CreateProductResponse,
     GetMarketPricesRequest,
@@ -43,11 +48,15 @@ from subastacampo.v1.catalog_pb2 import (
     ListProductsResponse,
     SuggestPriceRequest,
     SuggestPriceResponse,
+    WatchMarketPricesRequest,
+    WatchMarketPricesResponse,
 )
 
 MAX_QUANTITY = Decimal("1000000")
 _CENT = Decimal("0.01")
 DEMAND_WINDOW = timedelta(days=30)
+# The market stream sends fresh prices at least this often, even without closes.
+MARKET_REFRESH_SECONDS = 300.0
 # How far back closed auctions count as comparable sales.
 COMPARABLES_WINDOW = timedelta(days=90)
 
@@ -58,10 +67,16 @@ class CatalogServiceImpl(CatalogService):
         session_factory: async_sessionmaker[AsyncSession],
         calendar: BusinessCalendar,
         pricing: PricingModel,
+        broker: AuctionEventBroker | None = None,
+        clock: Clock | None = None,
+        market_refresh_seconds: float = MARKET_REFRESH_SECONDS,
     ) -> None:
         self._session_factory = session_factory
         self._calendar = calendar
         self._pricing = pricing
+        self._broker = broker or AuctionEventBroker()
+        self._clock = clock
+        self._market_refresh_seconds = market_refresh_seconds
 
     async def create_product(
         self,
@@ -187,16 +202,48 @@ class CatalogServiceImpl(CatalogService):
         ctx: RequestContext[GetMarketPricesRequest, GetMarketPricesResponse],
     ) -> GetMarketPricesResponse:
         days = period_days(request.days)
+        categories = await self._market(days)
+        return GetMarketPricesResponse(categories=categories, days=days)
+
+    async def watch_market_prices(
+        self,
+        request: WatchMarketPricesRequest,
+        ctx: RequestContext[WatchMarketPricesRequest, WatchMarketPricesResponse],
+    ) -> AsyncIterator[WatchMarketPricesResponse]:
+        days = period_days(request.days)
+        # Subscribe first: a close that happens while the first answer is computed
+        # still triggers the next one.
+        with self._broker.subscribe_market() as subscription:
+            while True:
+                yield WatchMarketPricesResponse(
+                    categories=await self._market(days),
+                    days=days,
+                    updated_at=to_timestamp(self._now()),
+                )
+                try:
+                    async with asyncio.timeout(self._market_refresh_seconds):
+                        await subscription.next()
+                    # Several closes at once (the closer runs in batches): one answer.
+                    subscription.drain()
+                except TimeoutError:
+                    pass  # periodic refresh, which also keeps proxies from closing the stream
+                except SubscriptionOverflowError as error:
+                    raise ConnectError(
+                        Code.ABORTED, "Too many pending events: reconnect to resume"
+                    ) from error
+
+    def _now(self) -> datetime:
+        return self._clock.now() if self._clock else datetime.now(UTC)
+
+    async def _market(self, days: int) -> list[CategoryMarket]:
         since = datetime.combine(self._calendar.today(), time.min, UTC) - timedelta(days=days)
-        sales: dict[ProductCategory, list[Sale]] = {category: [] for category in ProductCategory}
+        sales: dict[ProductCategory, list[Sale]] = {}
         async with self._session_factory() as session:
             for category in ProductCategory:
                 sales[category] = await _recent_sales(
                     session, category, exclude=None, since=since, limit=1000
                 )
-        return GetMarketPricesResponse(
-            categories=[to_category_market(summary) for summary in summarize(sales)], days=days
-        )
+        return [to_category_market(summary) for summary in summarize(sales)]
 
 
 async def _category_demand(session: AsyncSession, category: ProductCategory) -> float | None:

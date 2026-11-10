@@ -13,6 +13,8 @@ from collections.abc import Iterator
 from subastacampo.v1.auction_pb2 import WatchAuctionResponse
 
 DEFAULT_QUEUE_SIZE = 100
+# Channel of the market-wide feed: it hears every auction that closes.
+MARKET_CHANNEL = uuid.UUID(int=0)
 
 
 class SubscriptionOverflowError(Exception):
@@ -36,6 +38,17 @@ class Subscription:
             self._queue.get_nowait()
         self._queue.put_nowait(None)
 
+    def drain(self) -> int:
+        """Drops the events already waiting; returns how many. An end marker stays."""
+        dropped = 0
+        while not self._queue.empty():
+            event = self._queue.get_nowait()
+            if event is None:
+                self._queue.put_nowait(None)
+                break
+            dropped += 1
+        return dropped
+
     async def next(self) -> WatchAuctionResponse:
         event = await self._queue.get()
         if event is None:
@@ -58,6 +71,16 @@ class AuctionEventBroker:
             self._remove(auction_id, subscription)
 
     def publish(self, auction_id: uuid.UUID, event: WatchAuctionResponse) -> None:
+        self._deliver(auction_id, event)
+        # A close changes the market prices: the market feed hears it too.
+        if event.WhichOneof("event") == "auction_closed" and auction_id != MARKET_CHANNEL:
+            self._deliver(MARKET_CHANNEL, event)
+
+    def subscribe_market(self) -> contextlib.AbstractContextManager[Subscription]:
+        """Every auction close, from any auction."""
+        return self.subscribe(MARKET_CHANNEL)
+
+    def _deliver(self, auction_id: uuid.UUID, event: WatchAuctionResponse) -> None:
         for subscription in list(self._subscriptions.get(auction_id, ())):
             if not subscription.offer(event):
                 # A slow client must never slow down the others: drop it.

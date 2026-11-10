@@ -16,12 +16,15 @@ service CatalogService {
   rpc ListProducts(ListProductsRequest) returns (ListProductsResponse) {
     option idempotency_level = NO_SIDE_EFFECTS;
   }
-  // Suggests a price with the pricing model, explaining the main factors.
   // Price per kilo the platform's closed auctions reached, by category and week.
   // Public: producers check it before pricing, buyers before bidding.
   rpc GetMarketPrices(GetMarketPricesRequest) returns (GetMarketPricesResponse) {
     option idempotency_level = NO_SIDE_EFFECTS;
   }
+  // The same market prices, live: a first message right away, then a new one
+  // every time an auction closes (and every few minutes, to keep the stream open).
+  rpc WatchMarketPrices(WatchMarketPricesRequest) returns (stream WatchMarketPricesResponse);
+  // Suggests a price with the pricing model, explaining the main factors.
   rpc SuggestPrice(SuggestPriceRequest) returns (SuggestPriceResponse) {
     option idempotency_level = NO_SIDE_EFFECTS;
   }
@@ -161,4 +164,15 @@ message WeeklyPrice {
   string week_start = 1;
   int32 sales = 2;
   Money median_price_per_kg = 3;
+}
+
+message WatchMarketPricesRequest {
+  // Days back to cover, 7 to 180. Defaults to 60 when unset.
+  int32 days = 1;
+}
+
+message WatchMarketPricesResponse {
+  repeated CategoryMarket categories = 1;
+  int32 days = 2;
+  google.protobuf.Timestamp updated_at = 3;
 }
